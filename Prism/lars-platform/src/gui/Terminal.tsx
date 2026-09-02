@@ -4,20 +4,7 @@ import { Terminal as TerminalIcon, Send } from 'lucide-react';
 
 function Terminal() {
   const [input, setInput] = useState('');
-  const [output, setOutput] = useState<string[]>([
-    'LARS Prism Integrated Terminal v1.4.0',
-    '시스템 에이전트와 통신할 준비가 되었습니다.',
-    '',
-    '📋 사용 가능한 명령어:',
-    '  • ollama llama2 <질문>   - 로컬 AI 모델 (예: ollama llama2 hello)',
-    '  • ollama mistral <질문>  - 로컬 Mistral 모델',
-    '  • cat <파일경로>          - 파일 읽기 (예: cat package.json)',
-    '  • write <경로> <내용>     - 파일 쓰기 (예: write test.txt hello)',
-    '  • ls                     - 파일 목록 보기',
-    '  • pwd                    - 현재 디렉토리 경로',
-    '  • 기타 shell 명령어       - 일반 터미널 명령어 실행',
-    ''
-  ]);
+  const [output, setOutput] = useState<string[]>(['LARS Prism Integrated Terminal v1.4.0', '시스템 에이전트와 통신할 준비가 되었습니다.']);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -27,41 +14,12 @@ function Terminal() {
 
     const newOutput = [...output, `\n> ${input}`];
     setOutput(newOutput);
-    const currentCmd = input.trim();
+    const currentCmd = input;
     setInput('');
 
     try {
-      // 특별 명령어 처리
-      if (currentCmd.startsWith('claude ')) {
-        // Claude 에이전트는 외부 API가 필요함
-        const args = currentCmd.substring(7).trim();
-        const errorMsg = `[❌ 에러] Claude 에이전트는 API 키 설정이 필요합니다.\n\n대신 로컬 모델을 사용하세요:\n• ollama llama2 ${args}\n• ollama mistral ${args}\n\n또는 Ecosystem에서 Claude API 키를 설정하세요.`;
-        setOutput(prev => [...prev, errorMsg]);
-      } else if (currentCmd.startsWith('cat ')) {
-        // 파일 읽기
-        const filepath = currentCmd.substring(4).trim();
-        const result = await invoke<string>('execute_terminal_command', { command: `cat "${filepath}"` });
-        setOutput(prev => [...prev, result]);
-      } else if (currentCmd.startsWith('write ')) {
-        // 파일 쓰기: write <filepath> <content>
-        const parts = currentCmd.substring(6).split(' ');
-        if (parts.length >= 2) {
-          const filepath = parts[0];
-          const content = currentCmd.substring(6 + filepath.length + 1).trim();
-          const result = await invoke<string>('execute_terminal_command', { command: `echo "${content}" > "${filepath}"` });
-          setOutput(prev => [...prev, `✅ 파일 저장 완료: ${filepath}`, result]);
-        } else {
-          setOutput(prev => [...prev, `[ERROR] 사용법: write <filepath> <content>`]);
-        }
-      } else if (currentCmd.startsWith('ls') || currentCmd.startsWith('pwd') || currentCmd.startsWith('echo ')) {
-        // 기본 shell 명령어
-        const result = await invoke<string>('execute_terminal_command', { command: currentCmd });
-        setOutput(prev => [...prev, result]);
-      } else {
-        // 그 외의 명령어
-        const result = await invoke<string>('execute_terminal_command', { command: currentCmd });
-        setOutput(prev => [...prev, result]);
-      }
+      const result = await invoke<string>('execute_terminal_command', { command: currentCmd });
+      setOutput(prev => [...prev, result]);
     } catch (err) {
       setOutput(prev => [...prev, `[ERROR] ${err}`]);
     }

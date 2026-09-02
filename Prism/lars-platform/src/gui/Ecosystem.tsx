@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
 import { open } from '@tauri-apps/api/dialog';
-import { open as openUrl } from '@tauri-apps/api/shell';
 import {
   Folder,
   Zap,
@@ -101,45 +100,8 @@ interface GeneratedImage {
   size: string;
 }
 
-interface EcosystemProps {
-  language?: 'ko' | 'en' | 'ja' | 'zh';
-}
-
-const ECOSYSTEM_TEXTS = {
-  ko: {
-    subtitle: '지능형 에이전트의 프로젝트와 기술 생태계를 관리합니다.',
-    projects: '프로젝트',
-    agents: '에이전트',
-  },
-  en: {
-    subtitle: 'Manage intelligent agent projects and technical ecosystem.',
-    projects: 'Projects',
-    agents: 'Agents',
-  },
-  ja: {
-    subtitle: 'インテリジェントエージェントのプロジェクトと技術エコシステムを管理します。',
-    projects: 'プロジェクト',
-    agents: 'エージェント',
-  },
-  zh: {
-    subtitle: '管理智能代理项目和技术生态系统。',
-    projects: '项目',
-    agents: '代理',
-  }
-};
-
-export default function Ecosystem({ language: propLanguage }: EcosystemProps) {
-  const [language] = useState<'ko' | 'en' | 'ja' | 'zh'>(() => {
-    // 시스템 언어에 따라 자동 감지
-    const browserLang = navigator.language.toLowerCase();
-    if (browserLang.startsWith('ko')) return 'ko';
-    if (browserLang.startsWith('ja')) return 'ja';
-    if (browserLang.startsWith('zh')) return 'zh';
-    return 'en'; // 기본값 영문
-  });
-  const [activeTab, setActiveTab] = useState<'projects' | 'extensions' | 'productivity' | 'analysis'>('projects');
-  const [productivitySubTab, setProductivitySubTab] = useState<'images' | 'presentations' | 'codes' | 'documents'>('images');
-  const [extensionsSubTab, setExtensionsSubTab] = useState<'agents' | 'skills' | 'connectors' | 'apps' | 'oauth'>('agents');
+export default function Ecosystem() {
+  const [activeTab, setActiveTab] = useState<'projects' | 'skills' | 'connectors' | 'apps' | 'agents' | 'oauth' | 'images'>('projects');
   const [projects, setProjects] = useState<Project[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [connectors, setConnectors] = useState<Connector[]>([]);
@@ -149,57 +111,17 @@ export default function Ecosystem({ language: propLanguage }: EcosystemProps) {
   const [oauthServices, setOAuthServices] = useState<OAuthService[]>([]);
   const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
 
-  // 생성된 콘텐츠 State
-  const [presentations, setPresentations] = useState<any[]>([]);
-  const [codes, setCodes] = useState<any[]>([]);
-  const [documents, setDocuments] = useState<any[]>([]);
-  const [analysisResults, setAnalysisResults] = useState<any[]>([]);
-
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [selectedAgentCategory, setSelectedAgentCategory] = useState('All');
 
-  // Generation Form State
+  // Image Generation State
   const [imagePrompt, setImagePrompt] = useState('');
   const [imageModel, setImageModel] = useState('dalle');
   const [imageQuality, setImageQuality] = useState('hd');
   const [imageStyle, setImageStyle] = useState('vibrant');
   const [isGenerating, setIsGenerating] = useState(false);
-
-  // Presentation Form
-  const [presTitle, setPresTitle] = useState('');
-  const [presAudience, setPresAudience] = useState('team');
-  const [presSlides, setPresSlides] = useState('10');
-
-  // Code Form
-  const [codeTask, setCodeTask] = useState('');
-  const [codeLanguage, setCodeLanguage] = useState('python');
-
-  // Document Form
-  const [docTopic, setDocTopic] = useState('');
-  const [docType, setDocType] = useState('markdown');
-  const [docLength, setDocLength] = useState('medium');
-
-  // Analysis Form
-  const [analysisData, setAnalysisData] = useState('');
-  const [analysisType, setAnalysisType] = useState('summary');
-
-  // Frontier Agents State
-  const [frontierAgents, setFrontierAgents] = useState<any[]>([]);
-  const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
-  const [agentQuery, setAgentQuery] = useState('');
-  const [agentResponse, setAgentResponse] = useState('');
-  const [isAgentQuerying, setIsAgentQuerying] = useState(false);
-  const [showAddAgent, setShowAddAgent] = useState(false);
-  const [detectedAgents, setDetectedAgents] = useState<any>({});
-  const [newAgentForm, setNewAgentForm] = useState({
-    name: 'GPT-4',
-    type: 'openai',
-    apiKey: '',
-    model: 'gpt-4',
-    description: 'OpenAI GPT-4'
-  });
 
   const [showAddForm, setShowAddForm] = useState<'none' | 'skill' | 'connector'>('none');
   const [showOAuthForm, setShowOAuthForm] = useState<'none' | 'github' | 'slack' | 'notion' | 'airtable'>('none');
@@ -239,18 +161,6 @@ export default function Ecosystem({ language: propLanguage }: EcosystemProps) {
       invoke<GeneratedImage[]>('get_image_history')
         .then(imgs => { console.log('[Ecosystem] generated_images:', imgs?.length); setGeneratedImages(imgs || []); })
         .catch(e => { console.error('[Ecosystem] get_image_history failed:', e); setGeneratedImages([]); });
-
-      // 감지된 에이전트 로드
-      try {
-        const response = await fetch('http://localhost:8000/api/agent/detect');
-        if (response.ok) {
-          const data = await response.json();
-          console.log('[Ecosystem] detected_agents:', data);
-          setDetectedAgents(data.detected_agents || {});
-        }
-      } catch (err) {
-        console.error('[Ecosystem] detect_agents failed:', err);
-      }
     } catch (err) {
       console.error('[Ecosystem] 기본 데이터 로드 실패:', err);
     }
@@ -341,42 +251,25 @@ export default function Ecosystem({ language: propLanguage }: EcosystemProps) {
 
     setIsGenerating(true);
     try {
-      const response = await fetch('http://127.0.0.1:8000/api/image/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: imagePrompt,
-          style: imageStyle
-        })
+      const result = await invoke<{ status: string; image: GeneratedImage }>('generate_image', {
+        prompt: imagePrompt,
+        model: imageModel,
+        quality: imageQuality,
+        style: imageStyle,
+        size: '1024x1024'
       });
 
-      if (!response.ok) {
-        throw new Error(`API error: ${response.statusText}`);
-      }
-
-      const result = await response.json();
-
-      if (result.success) {
-        const newImage: GeneratedImage = {
-          id: Date.now().toString(),
-          prompt: imagePrompt,
-          model: imageModel,
-          image_url: result.prompt,
-          status: 'completed',
-          created_at: new Date().toISOString(),
-          style: imageStyle,
-          quality: imageQuality,
-          size: '1024x1024'
-        };
-
-        setGeneratedImages([newImage, ...generatedImages]);
-        alert(`✅ 이미지 프롬프트가 생성되었습니다!\n\n${result.prompt}`);
+      if (result.image) {
+        setGeneratedImages([result.image, ...generatedImages]);
+        if (result.status === 'success') {
+          alert(`✅ ${imageModel} 이미지가 생성되었습니다!`);
+        } else {
+          alert(`⏳ ${imageModel}에 요청을 보냈습니다. 생성 중...`);
+        }
         setImagePrompt('');
-      } else {
-        alert(`⚠️ 오류: ${result.message || 'Unknown error'}`);
       }
     } catch (err) {
-      alert(`이미지 생성 실패: ${err instanceof Error ? err.message : String(err)}`);
+      alert(`이미지 생성 실패: ${err}`);
     } finally {
       setIsGenerating(false);
     }
@@ -391,252 +284,6 @@ export default function Ecosystem({ language: propLanguage }: EcosystemProps) {
     } catch (err) {
       alert(`이미지 삭제 실패: ${err}`);
     }
-  };
-
-  const handleGeneratePresentation = async () => {
-    if (!presTitle.trim()) {
-      alert('주제를 입력하세요.');
-      return;
-    }
-
-    setIsGenerating(true);
-    try {
-      const response = await fetch('http://127.0.0.1:8000/api/presentation/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          topic: presTitle,
-          audience: presAudience,
-          num_slides: parseInt(presSlides)
-        })
-      });
-
-      if (!response.ok) throw new Error(`API error: ${response.statusText}`);
-      const result = await response.json();
-
-      if (result.success) {
-        const newPres = {
-          id: Date.now().toString(),
-          title: presTitle,
-          slides: result.slides_count,
-          filename: result.filename,
-          size: result.file_size_kb,
-          createdAt: new Date().toISOString()
-        };
-        setPresentations([newPres, ...presentations]);
-        alert(`✅ 프레젠테이션 생성 완료!\n${result.slides_count}개 슬라이드\n파일: ${result.filename}`);
-        setPresTitle('');
-      } else {
-        alert(`⚠️ 오류: ${result.message || 'Unknown error'}`);
-      }
-    } catch (err) {
-      alert(`프레젠테이션 생성 실패: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setIsGenerating(false);
-    }
-  };
-
-  const handleGenerateCode = async () => {
-    if (!codeTask.trim()) {
-      alert('작업을 설명해주세요.');
-      return;
-    }
-
-    setIsGenerating(true);
-    try {
-      const response = await fetch('http://127.0.0.1:8000/api/code/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          task: codeTask,
-          language: codeLanguage
-        })
-      });
-
-      if (!response.ok) throw new Error(`API error: ${response.statusText}`);
-      const result = await response.json();
-
-      if (result.success) {
-        const newCode = {
-          id: Date.now().toString(),
-          task: codeTask,
-          language: result.language,
-          code: result.code,
-          createdAt: new Date().toISOString()
-        };
-        setCodes([newCode, ...codes]);
-        alert(`✅ 코드 생성 완료!\n언어: ${result.language}`);
-        setCodeTask('');
-      } else {
-        alert(`⚠️ 오류: ${result.message || 'Unknown error'}`);
-      }
-    } catch (err) {
-      alert(`코드 생성 실패: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setIsGenerating(false);
-    }
-  };
-
-  const handleGenerateDocument = async () => {
-    if (!docTopic.trim()) {
-      alert('주제를 입력하세요.');
-      return;
-    }
-
-    setIsGenerating(true);
-    try {
-      const response = await fetch('http://127.0.0.1:8000/api/document/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          topic: docTopic,
-          doc_type: docType,
-          length: docLength
-        })
-      });
-
-      if (!response.ok) throw new Error(`API error: ${response.statusText}`);
-      const result = await response.json();
-
-      if (result.success) {
-        const newDoc = {
-          id: Date.now().toString(),
-          topic: docTopic,
-          type: result.doc_type,
-          content: result.content,
-          filename: result.filename,
-          createdAt: new Date().toISOString()
-        };
-        setDocuments([newDoc, ...documents]);
-        alert(`✅ 문서 생성 완료!\n파일: ${result.filename}`);
-        setDocTopic('');
-      } else {
-        alert(`⚠️ 오류: ${result.message || 'Unknown error'}`);
-      }
-    } catch (err) {
-      alert(`문서 생성 실패: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setIsGenerating(false);
-    }
-  };
-
-  const handleAnalyzeData = async () => {
-    if (!analysisData.trim()) {
-      alert('분석할 데이터를 입력하세요.');
-      return;
-    }
-
-    setIsGenerating(true);
-    try {
-      const response = await fetch('http://127.0.0.1:8000/api/analysis/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          data: analysisData,
-          analysis_type: analysisType
-        })
-      });
-
-      if (!response.ok) throw new Error(`API error: ${response.statusText}`);
-      const result = await response.json();
-
-      if (result.success) {
-        const newAnalysis = {
-          id: Date.now().toString(),
-          type: result.analysis_type,
-          dataSize: result.data_size,
-          summary: result.summary,
-          analysis: result.analysis,
-          createdAt: new Date().toISOString()
-        };
-        setAnalysisResults([newAnalysis, ...analysisResults]);
-        alert(`✅ 분석 완료!\n요약: ${result.summary}`);
-        setAnalysisData('');
-      } else {
-        alert(`⚠️ 오류: ${result.message || 'Unknown error'}`);
-      }
-    } catch (err) {
-      alert(`분석 실패: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setIsGenerating(false);
-    }
-  };
-
-  const handleAddFrontierAgent = async () => {
-    if (!newAgentForm.apiKey.trim()) {
-      alert('API 키를 입력하세요.');
-      return;
-    }
-
-    const agent = {
-      id: Date.now().toString(),
-      ...newAgentForm,
-      status: 'active',
-      createdAt: new Date().toISOString()
-    };
-
-    setFrontierAgents([...frontierAgents, agent]);
-    setSelectedAgent(agent.id);
-    setShowAddAgent(false);
-    setNewAgentForm({
-      name: 'GPT-4',
-      type: 'openai',
-      apiKey: '',
-      model: 'gpt-4',
-      description: 'OpenAI GPT-4'
-    });
-    alert(`✅ ${agent.name} 에이전트가 추가되었습니다!`);
-  };
-
-  const handleQueryAgent = async () => {
-    if (!selectedAgent) {
-      alert('에이전트를 선택하세요.');
-      return;
-    }
-
-    if (!agentQuery.trim()) {
-      alert('질문을 입력하세요.');
-      return;
-    }
-
-    setIsAgentQuerying(true);
-    try {
-      const agent = frontierAgents.find(a => a.id === selectedAgent);
-      if (!agent) throw new Error('Agent not found');
-
-      const response = await fetch('http://127.0.0.1:8000/api/agent/query', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          agent_type: agent.type,
-          model: agent.model,
-          api_key: agent.apiKey,
-          query: agentQuery
-        })
-      });
-
-      if (!response.ok) throw new Error(`API error: ${response.statusText}`);
-      const result = await response.json();
-
-      if (result.success) {
-        setAgentResponse(result.response);
-      } else {
-        alert(`⚠️ 오류: ${result.message || 'Unknown error'}`);
-      }
-    } catch (err) {
-      alert(`쿼리 실패: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setIsAgentQuerying(false);
-    }
-  };
-
-  const handleRemoveAgent = (agentId: string) => {
-    if (!confirm('이 에이전트를 제거하시겠습니까?')) return;
-    setFrontierAgents(frontierAgents.filter(a => a.id !== agentId));
-    if (selectedAgent === agentId) {
-      setSelectedAgent(null);
-    }
-    alert('✅ 에이전트가 제거되었습니다.');
   };
 
   const handleFormSubmit = async () => {
@@ -664,21 +311,30 @@ export default function Ecosystem({ language: propLanguage }: EcosystemProps) {
     <div className="ecosystem-view animate-in">
       <header className="view-header">
         <h1 style={{color: 'white'}}>LARS Ecosystem</h1>
-        <p className="view-subtitle">{ECOSYSTEM_TEXTS[language as keyof typeof ECOSYSTEM_TEXTS]?.subtitle || '지능형 에이전트의 프로젝트와 기술 생태계를 관리합니다.'}</p>
+        <p className="view-subtitle">지능형 에이전트의 프로젝트와 기술 생태계를 관리합니다.</p>
       </header>
 
       <div className="ecosystem-tabs">
         <button className={activeTab === 'projects' ? 'active' : ''} onClick={() => setActiveTab('projects')}>
-          <Folder size={18} /> {ECOSYSTEM_TEXTS[language as keyof typeof ECOSYSTEM_TEXTS]?.projects || '프로젝트'}
+          <Folder size={18} /> 프로젝트
         </button>
-        <button className={activeTab === 'analysis' ? 'active' : ''} onClick={() => setActiveTab('analysis')}>
-          <Server size={18} /> 분석
+        <button className={activeTab === 'agents' ? 'active' : ''} onClick={() => setActiveTab('agents')}>
+          <Brain size={18} /> 에이전트
         </button>
-        <button className={activeTab === 'productivity' ? 'active' : ''} onClick={() => setActiveTab('productivity')}>
-          <Zap size={18} /> 생산성 도구
+        <button className={activeTab === 'skills' ? 'active' : ''} onClick={() => setActiveTab('skills')}>
+          <Zap size={18} /> 스킬
         </button>
-        <button className={activeTab === 'extensions' ? 'active' : ''} onClick={() => setActiveTab('extensions')}>
-          <Unplug size={18} /> 확장
+        <button className={activeTab === 'connectors' ? 'active' : ''} onClick={() => setActiveTab('connectors')}>
+          <Unplug size={18} /> 커넥터
+        </button>
+        <button className={activeTab === 'apps' ? 'active' : ''} onClick={() => setActiveTab('apps')}>
+          <ShoppingBag size={18} /> 앱
+        </button>
+        <button className={activeTab === 'oauth' ? 'active' : ''} onClick={() => setActiveTab('oauth')}>
+          <Key size={18} /> OAuth
+        </button>
+        <button className={activeTab === 'images' ? 'active' : ''} onClick={() => setActiveTab('images')}>
+          <Wand2 size={18} /> 이미지 스튜디오
         </button>
       </div>
 
@@ -702,406 +358,183 @@ export default function Ecosystem({ language: propLanguage }: EcosystemProps) {
           </div>
         )}
 
-        {activeTab === 'extensions' && (
-          <div className="extensions-view" style={{display: 'flex', flexDirection: 'column', gap: '2rem'}}>
-            {/* 확장 도구 서브탭 */}
-            <div style={{display: 'flex', gap: '1rem', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '1rem', flexWrap: 'wrap'}}>
-              <button
-                onClick={() => setExtensionsSubTab('agents')}
-                style={{
-                  padding: '0.8rem 1.5rem',
-                  background: extensionsSubTab === 'agents' ? 'var(--accent-blue)' : 'rgba(255,255,255,0.05)',
-                  color: extensionsSubTab === 'agents' ? '#fff' : 'var(--text-dim)',
-                  border: 'none',
-                  borderRadius: '8px',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  fontSize: '0.9rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem'
-                }}
-              >
-                <Brain size={18} /> 에이전트
-              </button>
-              <button
-                onClick={() => setExtensionsSubTab('skills')}
-                style={{
-                  padding: '0.8rem 1.5rem',
-                  background: extensionsSubTab === 'skills' ? 'var(--accent-blue)' : 'rgba(255,255,255,0.05)',
-                  color: extensionsSubTab === 'skills' ? '#fff' : 'var(--text-dim)',
-                  border: 'none',
-                  borderRadius: '8px',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  fontSize: '0.9rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem'
-                }}
-              >
-                <Zap size={18} /> 스킬
-              </button>
-              <button
-                onClick={() => setExtensionsSubTab('connectors')}
-                style={{
-                  padding: '0.8rem 1.5rem',
-                  background: extensionsSubTab === 'connectors' ? 'var(--accent-blue)' : 'rgba(255,255,255,0.05)',
-                  color: extensionsSubTab === 'connectors' ? '#fff' : 'var(--text-dim)',
-                  border: 'none',
-                  borderRadius: '8px',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  fontSize: '0.9rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem'
-                }}
-              >
-                <Unplug size={18} /> 커넥터
-              </button>
-              <button
-                onClick={() => setExtensionsSubTab('apps')}
-                style={{
-                  padding: '0.8rem 1.5rem',
-                  background: extensionsSubTab === 'apps' ? 'var(--accent-blue)' : 'rgba(255,255,255,0.05)',
-                  color: extensionsSubTab === 'apps' ? '#fff' : 'var(--text-dim)',
-                  border: 'none',
-                  borderRadius: '8px',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  fontSize: '0.9rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem'
-                }}
-              >
-                <ShoppingBag size={18} /> 앱
-              </button>
-              <button
-                onClick={() => setExtensionsSubTab('oauth')}
-                style={{
-                  padding: '0.8rem 1.5rem',
-                  background: extensionsSubTab === 'oauth' ? 'var(--accent-blue)' : 'rgba(255,255,255,0.05)',
-                  color: extensionsSubTab === 'oauth' ? '#fff' : 'var(--text-dim)',
-                  border: 'none',
-                  borderRadius: '8px',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  fontSize: '0.9rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem'
-                }}
-              >
-                <Key size={18} /> OAuth
-              </button>
-            </div>
-
-            {extensionsSubTab === 'agents' && (
-          <div className="agents-view" style={{display: 'flex', flexDirection: 'column', gap: '3rem'}}>
-            {/* Frontier Agents Section */}
-            <div>
-              <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem'}}>
-                <h2 style={{color: '#fff', fontSize: '1.3rem', fontWeight: 700}}>Frontier Agents ({frontierAgents.length})</h2>
-                <button
-                  onClick={() => setShowAddAgent(!showAddAgent)}
-                  style={{padding: '0.6rem 1.2rem', background: 'var(--accent-blue)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem'}}
-                >
-                  <Plus size={18} /> 에이전트 추가
-                </button>
-              </div>
-
-              {showAddAgent && (
-                <div style={{background: 'rgba(100, 108, 255, 0.1)', border: '1px solid rgba(100, 108, 255, 0.3)', borderRadius: '12px', padding: '1.5rem', marginBottom: '2rem'}}>
-                  <h3 style={{color: 'var(--accent-blue)', marginBottom: '1.5rem', fontSize: '1rem'}}>새 Frontier 에이전트 추가</h3>
-
-                  <div style={{marginBottom: '1.5rem'}}>
-                    <label style={{display: 'block', fontSize: '0.85rem', color: '#999', marginBottom: '1rem', fontWeight: 700}}>에이전트 선택</label>
-                    <div style={{display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', marginBottom: '1.5rem'}}>
-                      {[
-                        {
-                          id: 'openai',
-                          name: 'GPT-4',
-                          icon: '/openai.png',
-                          model: 'gpt-4',
-                          label: 'OpenAI',
-                          key: 'GPT-4',
-                          apiUrl: 'https://platform.openai.com/account/api-keys',
-                          guide: '1. OpenAI 공식 사이트 방문\n2. 로그인\n3. API Keys 탭에서 새 키 생성\n4. 키 복사 후 아래에 붙여넣기'
-                        },
-                        {
-                          id: 'anthropic',
-                          name: 'Claude',
-                          icon: '/anthropic.png',
-                          model: 'claude-3-opus',
-                          label: 'Anthropic',
-                          key: 'Claude-3',
-                          apiUrl: 'https://console.anthropic.com/account/keys',
-                          guide: '1. Anthropic Console 방문\n2. 로그인\n3. API Keys 페이지 열기\n4. API Key 생성 & 복사\n5. 아래에 붙여넣기'
-                        },
-                        {
-                          id: 'google',
-                          name: 'Gemini',
-                          icon: '/gemini.png',
-                          model: 'gemini-pro',
-                          label: 'Google',
-                          key: 'Gemini',
-                          apiUrl: 'https://aistudio.google.com/app/apikey',
-                          guide: '1. Google AI Studio 방문\n2. 로그인\n3. API Key 관리 클릭\n4. 새 API Key 생성\n5. 복사 후 아래에 붙여넣기'
-                        },
-                        {
-                          id: 'moonshot',
-                          name: 'Kimi',
-                          icon: '/moonshot.png',
-                          model: 'moonshot-v1-8k',
-                          label: 'Moonshot',
-                          key: 'Kimi',
-                          apiUrl: 'https://platform.moonshot.cn/account/api-keys',
-                          guide: '1. Moonshot Platform 방문\n2. 로그인\n3. API Key 페이지 열기\n4. 새 키 생성\n5. 복사 후 아래에 붙여넣기'
-                        }
-                      ].map(agent => {
-                        const isDetected = detectedAgents[agent.key];
-                        return (
-                          <button
-                            key={agent.id}
-                            onClick={() => {
-                              setNewAgentForm(prev => ({
-                                ...prev,
-                                type: agent.id,
-                                name: agent.name,
-                                model: agent.model
-                              }));
-                            }}
-                            disabled={!isDetected}
-                            style={{
-                              padding: '1rem',
-                              borderRadius: '12px',
-                              border: newAgentForm.type === agent.id ? '2px solid var(--accent-blue)' : '1px solid rgba(100, 108, 255, 0.3)',
-                              background: isDetected
-                                ? (newAgentForm.type === agent.id ? 'rgba(100, 108, 255, 0.2)' : 'rgba(255,255,255,0.05)')
-                                : 'rgba(255,255,255,0.02)',
-                              color: isDetected ? '#fff' : '#666',
-                              cursor: isDetected ? 'pointer' : 'not-allowed',
-                              display: 'flex',
-                              flexDirection: 'column',
-                              alignItems: 'center',
-                              gap: '0.5rem',
-                              transition: 'all 0.2s',
-                              opacity: isDetected ? 1 : 0.5
-                            }}
-                          >
-                            <img src={agent.icon} alt={agent.label} style={{width: '3rem', height: '3rem', objectFit: 'contain'}} />
-                            <span style={{fontSize: '0.8rem', fontWeight: 600}}>{agent.label}</span>
-                            <span style={{fontSize: '0.65rem', color: isDetected ? '#999' : '#555'}}>
-                              {isDetected ? '✅ 설치됨' : '❌ 미설치'}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div style={{display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem', marginBottom: '1.5rem'}}>
-                    <div>
-                      <label style={{display: 'block', fontSize: '0.85rem', color: '#999', marginBottom: '0.4rem', fontWeight: 700}}>에이전트 이름</label>
-                      <input
-                        type="text"
-                        value={newAgentForm.name}
-                        onChange={(e) => setNewAgentForm(prev => ({...prev, name: e.target.value}))}
-                        style={{width: '100%', padding: '0.8rem', borderRadius: '8px', border: '1px solid rgba(100, 108, 255, 0.3)', background: 'rgba(255,255,255,0.05)', color: '#fff'}}
-                      />
-                    </div>
-                  </div>
-
-                  <div style={{marginBottom: '1.5rem'}}>
-                    <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.8rem'}}>
-                      <label style={{fontSize: '0.85rem', color: '#999', fontWeight: 700}}>🔑 API 키 설정</label>
-                      {newAgentForm.type && (
-                        <button
-                          onClick={() => {
-                            const agentData = [
-                              { id: 'openai', apiUrl: 'https://platform.openai.com/account/api-keys' },
-                              { id: 'anthropic', apiUrl: 'https://console.anthropic.com/account/keys' },
-                              { id: 'google', apiUrl: 'https://aistudio.google.com/app/apikey' },
-                              { id: 'moonshot', apiUrl: 'https://platform.moonshot.cn/account/api-keys' }
-                            ].find(a => a.id === newAgentForm.type);
-                            if (agentData) openUrl(agentData.apiUrl);
-                          }}
-                          style={{
-                            padding: '0.4rem 0.8rem',
-                            background: 'rgba(100, 108, 255, 0.2)',
-                            color: 'var(--accent-blue)',
-                            border: '1px solid rgba(100, 108, 255, 0.3)',
-                            borderRadius: '6px',
-                            fontSize: '0.75rem',
-                            fontWeight: 700,
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.3rem'
-                          }}
-                        >
-                          🌐 공식 사이트 방문
-                        </button>
-                      )}
-                    </div>
-
-                    {newAgentForm.type && (
-                      <div style={{background: 'rgba(52, 199, 89, 0.1)', border: '1px solid rgba(52, 199, 89, 0.3)', borderRadius: '8px', padding: '0.8rem', marginBottom: '1rem'}}>
-                        <p style={{fontSize: '0.75rem', color: '#34c759', lineHeight: '1.5', whiteSpace: 'pre-line', margin: 0}}>
-                          {[
-                            { id: 'openai', guide: '1. OpenAI 공식 사이트 방문\n2. 로그인\n3. API Keys 탭에서 새 키 생성\n4. 키 복사 후 아래에 붙여넣기' },
-                            { id: 'anthropic', guide: '1. Anthropic Console 방문\n2. 로그인\n3. API Keys 페이지 열기\n4. API Key 생성 & 복사\n5. 아래에 붙여넣기' },
-                            { id: 'google', guide: '1. Google AI Studio 방문\n2. 로그인\n3. API Key 관리 클릭\n4. 새 API Key 생성\n5. 복사 후 아래에 붙여넣기' },
-                            { id: 'moonshot', guide: '1. Moonshot Platform 방문\n2. 로그인\n3. API Key 페이지 열기\n4. 새 키 생성\n5. 복사 후 아래에 붙여넣기' }
-                          ].find(a => a.id === newAgentForm.type)?.guide}
-                        </p>
-                      </div>
-                    )}
-
-                    <input
-                      type="password"
-                      placeholder={newAgentForm.type ? `${newAgentForm.type} API 키 붙여넣기...` : 'API 키를 입력하세요'}
-                      value={newAgentForm.apiKey}
-                      onChange={(e) => setNewAgentForm(prev => ({...prev, apiKey: e.target.value}))}
-                      style={{width: '100%', padding: '0.8rem', borderRadius: '8px', border: '1px solid rgba(100, 108, 255, 0.3)', background: 'rgba(255,255,255,0.05)', color: '#fff', fontFamily: 'monospace'}}
-                    />
-                    <p style={{fontSize: '0.75rem', color: '#666', marginTop: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.3rem'}}>
-                      🔒 API 키는 로컬에만 저장되며 절대 서버로 전송되지 않습니다.
-                    </p>
-                  </div>
-
-                  <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem'}}>
-                    <button
-                      onClick={handleAddFrontierAgent}
-                      style={{padding: '0.8rem', background: 'var(--accent-blue)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: 'pointer'}}
-                    >
-                      추가
-                    </button>
-                    <button
-                      onClick={() => setShowAddAgent(false)}
-                      style={{padding: '0.8rem', background: 'rgba(255,255,255,0.05)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', fontWeight: 700, cursor: 'pointer'}}
-                    >
-                      취소
-                    </button>
+        {activeTab === 'skills' && (
+          <div className="skills-list" style={{display: 'flex', flexDirection: 'column', gap: '1rem'}}>
+             {showAddForm === 'skill' ? (
+               <div className="add-form-box" style={{background: 'rgba(255,255,255,0.05)', padding: '1.5rem', borderRadius: '16px', border: '1px solid var(--accent-blue)'}}>
+                 <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '1rem'}}>
+                   <h3 style={{color: '#fff'}}>새로운 스킬 추가</h3>
+                   <X size={20} style={{cursor: 'pointer'}} onClick={() => setShowAddForm('none')} />
+                 </div>
+                 <input type="text" placeholder="스킬 이름 (예: GitHub Search)" className="inline-input" style={{width: '100%', marginBottom: '1rem'}} value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
+                 <input type="text" placeholder="스킬 설명 (기능 중심)" className="inline-input" style={{width: '100%', marginBottom: '1.5rem'}} value={formData.detail} onChange={e => setFormData({...formData, detail: e.target.value})} />
+                 <button className="apply-btn" style={{width: '100%'}} onClick={handleFormSubmit}>스킬 등록하기</button>
+               </div>
+             ) : (
+               <div className="add-skill-banner" onClick={() => setShowAddForm('skill')} style={{ background: 'rgba(100, 108, 255, 0.1)', border: '1px dashed var(--accent-blue)', padding: '1.5rem', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '1rem', cursor: 'pointer', color: 'var(--accent-blue)', fontWeight: 700 }}>
+                 <Plus size={20} /> 새로운 스킬(Skill) 추가하기
+               </div>
+             )}
+            {skills?.map(s => (
+              <div key={s.id} className="eco-list-item" style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(255,255,255,0.03)', padding: '1.5rem', borderRadius: '16px'}}>
+                <div style={{display: 'flex', alignItems: 'center', gap: '1.5rem'}}>
+                  <Zap size={24} color="#ffd700" />
+                  <div>
+                    <div className="item-name" style={{fontWeight: 700, color: '#fff'}}>{s.name}</div>
+                    <div className="item-cap" style={{fontSize: '0.9rem', color: 'var(--text-dim)'}}>{s.capability}</div>
                   </div>
                 </div>
-              )}
+                <div className={`status-badge active`} style={{padding: '0.4rem 0.8rem', borderRadius: '8px', background: 'rgba(52, 199, 89, 0.15)', color: '#34c759', fontSize: '0.75rem', fontWeight: 800}}>ACTIVE</div>
+              </div>
+            ))}
+          </div>
+        )}
 
-              {frontierAgents.length > 0 && (
-                <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: '1rem', marginBottom: '2rem'}}>
-                  {frontierAgents.map(agent => {
-                    const agentIcons: any = {
-                      'openai': { icon: '🟢', label: 'OpenAI GPT' },
-                      'anthropic': { icon: '🔴', label: 'Anthropic Claude' },
-                      'google': { icon: '⭐', label: 'Google Gemini' },
-                      'moonshot': { icon: '🌙', label: 'Moonshot Kimi' }
-                    };
-                    const agentInfo = agentIcons[agent.type] || { icon: '🤖', label: 'Unknown' };
+        {activeTab === 'connectors' && (
+          <div className="connectors-grid" style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1.5rem'}}>
+            {showAddForm === 'connector' ? (
+               <div className="add-form-box eco-card" style={{gridColumn: 'span 1', border: '1px solid var(--accent-blue)'}}>
+                 <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '1rem'}}>
+                   <h3 style={{color: '#fff', fontSize: '1rem'}}>커넥터 연결</h3>
+                   <X size={18} style={{cursor: 'pointer'}} onClick={() => setShowAddForm('none')} />
+                 </div>
+                 <input type="text" placeholder="이름 (예: My Slack)" className="inline-input" style={{width: '100%', marginBottom: '0.8rem', fontSize: '0.85rem'}} value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
+                 <input type="text" placeholder="종류 (예: github, slack)" className="inline-input" style={{width: '100%', marginBottom: '1.2rem', fontSize: '0.85rem'}} value={formData.detail} onChange={e => setFormData({...formData, detail: e.target.value})} />
+                 <button className="apply-btn" style={{width: '100%', padding: '0.6rem'}} onClick={handleFormSubmit}>연결</button>
+               </div>
+            ) : (
+              <div className="add-card" onClick={() => setShowAddForm('connector')} style={{minHeight: '180px'}}>
+                <Plus size={32} />
+                <span style={{marginTop: '1rem', fontWeight: 600}}>커넥터 연결</span>
+              </div>
+            )}
+             {connectors?.map(c => (
+              <div key={c.id} className="eco-card" style={{padding: '1.5rem'}}>
+                <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '1.5rem'}}>
+                  <Globe size={28} color="var(--accent-blue)" />
+                  <div className={`status-text`} style={{fontSize: '0.75rem', color: '#34c759', fontWeight: 800}}>● {c.status.toUpperCase()}</div>
+                </div>
+                <div className="conn-name" style={{fontWeight: 700, color: '#fff', fontSize: '1.1rem'}}>{c.name}</div>
+                <div className="conn-type" style={{fontSize: '0.85rem', color: 'var(--text-dim)', marginTop: '0.4rem'}}>{c.service_type}</div>
+              </div>
+            ))}
+          </div>
+        )}
 
-                    return (
-                      <div
-                        key={agent.id}
-                        onClick={() => setSelectedAgent(agent.id)}
-                        style={{
-                          padding: '1.5rem',
-                          background: selectedAgent === agent.id ? 'rgba(100, 108, 255, 0.2)' : 'rgba(255,255,255,0.05)',
-                          border: selectedAgent === agent.id ? '2px solid var(--accent-blue)' : '1px solid rgba(100, 108, 255, 0.3)',
-                          borderRadius: '12px',
-                          cursor: 'pointer',
-                          transition: 'all 0.2s'
-                        }}
-                      >
-                        <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem'}}>
-                          <span style={{fontSize: '2.5rem'}}>{agentInfo.icon}</span>
+        {activeTab === 'apps' && (
+          <div className="apps-view-container" style={{display: 'flex', flexDirection: 'column', gap: '2rem'}}>
+            {installedApps.length > 0 && (
+              <div>
+                <h2 style={{color: '#fff', marginBottom: '1.5rem', fontSize: '1.2rem', fontWeight: 700}}>설치된 앱</h2>
+                <div className="installed-apps-grid" style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1.5rem'}}>
+                  {installedApps.map(app => (
+                    <div key={app.id} className="eco-card" style={{opacity: app.enabled ? 1 : 0.7, borderLeft: `4px solid ${app.enabled ? '#34c759' : 'var(--text-dim)'}`, paddingLeft: 'calc(1.5rem - 4px)'}}>
+                      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '1rem'}}>
+                        <div>
+                          <div className="card-name" style={{marginBottom: '0.4rem'}}>{app.name}</div>
+                          <div style={{fontSize: '0.8rem', color: 'var(--text-dim)'}}>v{app.version}</div>
+                        </div>
+                        <div style={{display: 'flex', gap: '0.5rem'}}>
                           <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleRemoveAgent(agent.id);
-                            }}
-                            style={{background: 'rgba(255,59,48,0.1)', color: '#ff3b30', border: 'none', borderRadius: '6px', padding: '0.4rem', cursor: 'pointer'}}
+                            onClick={() => handleToggleApp(app)}
+                            style={{padding: '0.4rem', background: 'rgba(255,255,255,0.05)', border: 'none', borderRadius: '6px', cursor: 'pointer', color: app.enabled ? '#34c759' : 'var(--text-dim)'}}
+                            title={app.enabled ? '비활성화' : '활성화'}
                           >
-                            <Trash2 size={14} />
+                            <Power size={16} />
+                          </button>
+                          <button
+                            onClick={() => handleRemoveApp(app)}
+                            style={{padding: '0.4rem', background: 'rgba(255,255,255,0.05)', border: 'none', borderRadius: '6px', cursor: 'pointer', color: '#ff3b30'}}
+                            title="제거"
+                          >
+                            <Trash2 size={16} />
                           </button>
                         </div>
-                        <p style={{fontSize: '1rem', fontWeight: 700, color: '#fff', marginBottom: '0.4rem'}}>{agent.name}</p>
-                        <p style={{fontSize: '0.75rem', color: 'var(--accent-blue)', marginBottom: '0.6rem'}}>{agentInfo.label}</p>
-                        <p style={{fontSize: '0.75rem', color: '#999'}}>{agent.description || '모델: ' + agent.model}</p>
                       </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {frontierAgents.length > 0 && (
-                <div style={{background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(100, 108, 255, 0.2)', borderRadius: '12px', padding: '2rem'}}>
-                  <h3 style={{color: 'var(--accent-blue)', marginBottom: '1.5rem', fontSize: '1rem'}}>💬 에이전트 쿼리</h3>
-
-                  <div style={{marginBottom: '1.5rem'}}>
-                    <label style={{display: 'block', fontSize: '0.85rem', color: '#999', marginBottom: '0.8rem', fontWeight: 700}}>
-                      선택된 에이전트: {selectedAgent ? frontierAgents.find(a => a.id === selectedAgent)?.name : '선택 없음'}
-                    </label>
-                    <textarea
-                      placeholder="질문을 입력하세요..."
-                      value={agentQuery}
-                      onChange={(e) => setAgentQuery(e.target.value)}
-                      disabled={isAgentQuerying || !selectedAgent}
-                      style={{
-                        width: '100%',
-                        minHeight: '120px',
-                        padding: '1rem',
-                        borderRadius: '8px',
-                        border: '1px solid rgba(100, 108, 255, 0.3)',
-                        background: 'rgba(255,255,255,0.05)',
-                        color: '#fff',
-                        fontFamily: 'monospace',
-                        fontSize: '0.9rem',
-                        resize: 'vertical'
-                      }}
-                    />
-                  </div>
-
-                  <button
-                    onClick={handleQueryAgent}
-                    disabled={isAgentQuerying || !selectedAgent || !agentQuery.trim()}
-                    style={{
-                      padding: '0.8rem 1.5rem',
-                      background: 'var(--accent-blue)',
-                      color: '#fff',
-                      border: 'none',
-                      borderRadius: '8px',
-                      fontWeight: 700,
-                      cursor: isAgentQuerying || !selectedAgent ? 'not-allowed' : 'pointer',
-                      opacity: isAgentQuerying || !selectedAgent ? 0.5 : 1,
-                      marginBottom: '1.5rem'
-                    }}
-                  >
-                    {isAgentQuerying ? '⏳ 응답 대기 중...' : '🚀 쿼리 실행'}
-                  </button>
-
-                  {agentResponse && (
-                    <div style={{background: 'rgba(100, 108, 255, 0.1)', border: '1px solid rgba(100, 108, 255, 0.3)', borderRadius: '8px', padding: '1.5rem'}}>
-                      <h4 style={{color: 'var(--accent-blue)', marginBottom: '1rem'}}>📝 응답</h4>
-                      <p style={{color: '#fff', lineHeight: '1.6', whiteSpace: 'pre-wrap', wordBreak: 'break-word'}}>
-                        {agentResponse}
-                      </p>
+                      <p className="card-desc" style={{fontSize: '0.85rem', marginBottom: '1rem'}}>{app.desc}</p>
+                      <div style={{display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-dim)', paddingTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.1)'}}>
+                        <span>설치: {new Date(app.installed_at).toLocaleDateString('ko-KR')}</span>
+                        <span style={{color: app.enabled ? '#34c759' : '#ff3b30'}}>{app.enabled ? '활성' : '비활성'}</span>
+                      </div>
                     </div>
-                  )}
+                  ))}
                 </div>
-              )}
+              </div>
+            )}
 
-              {frontierAgents.length === 0 && (
-                <div style={{textAlign: 'center', padding: '3rem', color: 'var(--text-dim)', borderRadius: '12px', border: '1px dashed rgba(100, 108, 255, 0.3)'}}>
-                  <Brain size={48} style={{margin: '0 auto 1rem', opacity: 0.5}} />
-                  <p style={{fontSize: '1rem', marginBottom: '0.5rem'}}>등록된 Frontier 에이전트가 없습니다</p>
-                  <p style={{fontSize: '0.9rem'}}>GPT, Claude, Gemini, Kimi 등의 에이전트를 추가하여 사용하세요!</p>
+            <div>
+              <h2 style={{color: '#fff', marginBottom: '1.5rem', fontSize: '1.2rem', fontWeight: 700}}>앱 스토어</h2>
+              <div className="ecosystem-controls" style={{marginBottom: '1.5rem'}}>
+                <div className="search-wrapper">
+                  <Search size={18} className="search-icon" />
+                  <input
+                    type="text"
+                    placeholder="앱 검색..."
+                    className="ecosystem-search"
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                  />
                 </div>
-              )}
+                <div className="category-filters">
+                  {categories.map(cat => (
+                    <button
+                      key={cat}
+                      className={`filter-chip ${selectedCategory === cat ? 'active' : ''}`}
+                      onClick={() => setSelectedCategory(cat)}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="apps-grid">
+                {filteredApps.map(app => {
+                  const isInstalled = installedApps.some(ia => ia.id === app.id);
+                  return (
+                    <div key={app.id} className={`eco-card ${isInstalled ? 'installed' : ''}`} style={{opacity: isInstalled ? 0.6 : 1}}>
+                      <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '1.2rem'}}>
+                        <div style={{background: 'rgba(255,255,255,0.05)', padding: '0.8rem', borderRadius: '12px'}}>
+                          <Package size={24} color={isInstalled ? "var(--text-dim)" : "var(--accent-purple)"} />
+                        </div>
+                        <span style={{ fontSize: '0.7rem', color: 'var(--accent-purple)', fontWeight: 800, background: 'rgba(168, 85, 247, 0.1)', padding: '0.3rem 0.6rem', borderRadius: '6px', height: 'fit-content' }}>
+                          {app.category.toUpperCase()}
+                        </span>
+                      </div>
+                      <div className="card-name" style={{marginBottom: '0.6rem'}}>{app.name}</div>
+                      <p className="card-desc" style={{fontSize: '0.9rem', marginBottom: '1rem', height: '4.5rem', overflow: 'hidden'}}>{app.desc}</p>
+
+                      <div className="usage-guide" style={{background: 'rgba(255,255,255,0.03)', padding: '0.8rem', borderRadius: '12px', marginBottom: '1.5rem'}}>
+                         <div style={{fontSize: '0.65rem', fontWeight: 800, color: 'var(--accent-blue)', marginBottom: '0.4rem', letterSpacing: '0.05em'}}>최적 용도</div>
+                         <div style={{fontSize: '0.8rem', color: 'var(--text-main)', lineHeight: '1.4'}}>
+                            {app.category === 'Workflow' && "복잡한 앱 간 워크플로우 자동화"}
+                            {app.category === 'Agentic' && "멀티 에이전트 협업 및 오케스트레이션"}
+                            {app.category === 'RPA' && "GUI 작업 및 화면 조작 자동화"}
+                            {app.category === 'Data' && "구조화된 데이터 저장 및 관리"}
+                            {app.category === 'Document' && "문서 관리 자동화 및 지식 베이스"}
+                            {app.category === 'System' && "내부 관리 시스템 및 대시보드"}
+                         </div>
+                      </div>
+
+                      <button
+                        className={isInstalled ? "installed-btn" : "apply-patch-btn"}
+                        style={{ width: '100%', padding: '0.8rem', background: isInstalled ? 'rgba(255,255,255,0.05)' : '', color: isInstalled ? 'var(--text-dim)' : '', cursor: isInstalled ? 'default' : 'pointer' }}
+                        onClick={() => handleInstallApp(app)}
+                        disabled={isInstalled}
+                      >
+                        {isInstalled ? <div style={{display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem'}}><CheckCircle size={16}/> 설치됨</div> : "설치"}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
+          </div>
+        )}
 
-            {/* Discovered Agents Section */}
-            <div style={{borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '2rem'}}>
+        {activeTab === 'agents' && (
+          <div className="agents-view" style={{display: 'flex', flexDirection: 'column', gap: '2rem'}}>
+            <div>
               <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem'}}>
                 <h2 style={{color: '#fff', fontSize: '1.2rem', fontWeight: 700}}>발견된 에이전트 ({agents.length})</h2>
               </div>
@@ -1186,70 +619,7 @@ export default function Ecosystem({ language: propLanguage }: EcosystemProps) {
           </div>
         )}
 
-        {extensionsSubTab === 'skills' && (
-          <div className="skills-list" style={{display: 'flex', flexDirection: 'column', gap: '1rem'}}>
-             {showAddForm === 'skill' ? (
-               <div className="add-form-box" style={{background: 'rgba(255,255,255,0.05)', padding: '1.5rem', borderRadius: '16px', border: '1px solid var(--accent-blue)'}}>
-                 <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '1rem'}}>
-                   <h3 style={{color: '#fff'}}>새로운 스킬 추가</h3>
-                   <X size={20} style={{cursor: 'pointer'}} onClick={() => setShowAddForm('none')} />
-                 </div>
-                 <input type="text" placeholder="스킬 이름 (예: GitHub Search)" className="inline-input" style={{width: '100%', marginBottom: '1rem'}} value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
-                 <input type="text" placeholder="스킬 설명 (기능 중심)" className="inline-input" style={{width: '100%', marginBottom: '1.5rem'}} value={formData.detail} onChange={e => setFormData({...formData, detail: e.target.value})} />
-                 <button className="apply-btn" style={{width: '100%'}} onClick={handleFormSubmit}>스킬 등록하기</button>
-               </div>
-             ) : (
-               <div className="add-skill-banner" onClick={() => setShowAddForm('skill')} style={{ background: 'rgba(100, 108, 255, 0.1)', border: '1px dashed var(--accent-blue)', padding: '1.5rem', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '1rem', cursor: 'pointer', color: 'var(--accent-blue)', fontWeight: 700 }}>
-                 <Plus size={20} /> 새로운 스킬(Skill) 추가하기
-               </div>
-             )}
-            {skills?.map(s => (
-              <div key={s.id} className="eco-list-item" style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(255,255,255,0.03)', padding: '1.5rem', borderRadius: '16px'}}>
-                <div style={{display: 'flex', alignItems: 'center', gap: '1.5rem'}}>
-                  <Zap size={24} color="#ffd700" />
-                  <div>
-                    <div className="item-name" style={{fontWeight: 700, color: '#fff'}}>{s.name}</div>
-                    <div className="item-cap" style={{fontSize: '0.9rem', color: 'var(--text-dim)'}}>{s.capability}</div>
-                  </div>
-                </div>
-                <div className={`status-badge active`} style={{padding: '0.4rem 0.8rem', borderRadius: '8px', background: 'rgba(52, 199, 89, 0.15)', color: '#34c759', fontSize: '0.75rem', fontWeight: 800}}>ACTIVE</div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {extensionsSubTab === 'connectors' && (
-          <div className="connectors-grid" style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1.5rem'}}>
-            {showAddForm === 'connector' ? (
-               <div className="add-form-box eco-card" style={{gridColumn: 'span 1', border: '1px solid var(--accent-blue)'}}>
-                 <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '1rem'}}>
-                   <h3 style={{color: '#fff', fontSize: '1rem'}}>커넥터 연결</h3>
-                   <X size={18} style={{cursor: 'pointer'}} onClick={() => setShowAddForm('none')} />
-                 </div>
-                 <input type="text" placeholder="이름 (예: My Slack)" className="inline-input" style={{width: '100%', marginBottom: '0.8rem', fontSize: '0.85rem'}} value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
-                 <input type="text" placeholder="종류 (예: github, slack)" className="inline-input" style={{width: '100%', marginBottom: '1.2rem', fontSize: '0.85rem'}} value={formData.detail} onChange={e => setFormData({...formData, detail: e.target.value})} />
-                 <button className="apply-btn" style={{width: '100%', padding: '0.6rem'}} onClick={handleFormSubmit}>연결</button>
-               </div>
-            ) : (
-              <div className="add-card" onClick={() => setShowAddForm('connector')} style={{minHeight: '180px'}}>
-                <Plus size={32} />
-                <span style={{marginTop: '1rem', fontWeight: 600}}>커넥터 연결</span>
-              </div>
-            )}
-             {connectors?.map(c => (
-              <div key={c.id} className="eco-card" style={{padding: '1.5rem'}}>
-                <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '1.5rem'}}>
-                  <Globe size={28} color="var(--accent-blue)" />
-                  <div className={`status-text`} style={{fontSize: '0.75rem', color: '#34c759', fontWeight: 800}}>● {c.status.toUpperCase()}</div>
-                </div>
-                <div className="conn-name" style={{fontWeight: 700, color: '#fff', fontSize: '1.1rem'}}>{c.name}</div>
-                <div className="conn-type" style={{fontSize: '0.85rem', color: 'var(--text-dim)', marginTop: '0.4rem'}}>{c.service_type}</div>
-              </div>
-            ))}
-          </div>
-        )}
-
-            {extensionsSubTab === 'oauth' && (
+        {activeTab === 'oauth' && (
           <div className="oauth-view" style={{display: 'flex', flexDirection: 'column', gap: '2rem'}}>
             {oauthServices.length > 0 && (
               <div>
@@ -1355,89 +725,9 @@ export default function Ecosystem({ language: propLanguage }: EcosystemProps) {
               )}
             </div>
           </div>
-            )}
-          </div>
         )}
 
-        {activeTab === 'productivity' && (
-          <div className="productivity-view" style={{display: 'flex', flexDirection: 'column', gap: '2rem'}}>
-            {/* 생산성 도구 서브탭 */}
-            <div style={{display: 'flex', gap: '1rem', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '1rem', flexWrap: 'wrap'}}>
-              <button
-                onClick={() => setProductivitySubTab('images')}
-                style={{
-                  padding: '0.8rem 1.5rem',
-                  background: productivitySubTab === 'images' ? 'var(--accent-blue)' : 'rgba(255,255,255,0.05)',
-                  color: productivitySubTab === 'images' ? '#fff' : 'var(--text-dim)',
-                  border: 'none',
-                  borderRadius: '8px',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  fontSize: '0.9rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem'
-                }}
-              >
-                <Wand2 size={18} /> 이미지
-              </button>
-              <button
-                onClick={() => setProductivitySubTab('presentations')}
-                style={{
-                  padding: '0.8rem 1.5rem',
-                  background: productivitySubTab === 'presentations' ? 'var(--accent-blue)' : 'rgba(255,255,255,0.05)',
-                  color: productivitySubTab === 'presentations' ? '#fff' : 'var(--text-dim)',
-                  border: 'none',
-                  borderRadius: '8px',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  fontSize: '0.9rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem'
-                }}
-              >
-                <LayoutGrid size={18} /> 프레젠테이션
-              </button>
-              <button
-                onClick={() => setProductivitySubTab('codes')}
-                style={{
-                  padding: '0.8rem 1.5rem',
-                  background: productivitySubTab === 'codes' ? 'var(--accent-blue)' : 'rgba(255,255,255,0.05)',
-                  color: productivitySubTab === 'codes' ? '#fff' : 'var(--text-dim)',
-                  border: 'none',
-                  borderRadius: '8px',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  fontSize: '0.9rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem'
-                }}
-              >
-                <Cpu size={18} /> 코드
-              </button>
-              <button
-                onClick={() => setProductivitySubTab('documents')}
-                style={{
-                  padding: '0.8rem 1.5rem',
-                  background: productivitySubTab === 'documents' ? 'var(--accent-blue)' : 'rgba(255,255,255,0.05)',
-                  color: productivitySubTab === 'documents' ? '#fff' : 'var(--text-dim)',
-                  border: 'none',
-                  borderRadius: '8px',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  fontSize: '0.9rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem'
-                }}
-              >
-                <Database size={18} /> 문서
-              </button>
-            </div>
-
-            {productivitySubTab === 'images' && (
+        {activeTab === 'images' && (
           <div className="image-studio-view" style={{display: 'flex', flexDirection: 'column', gap: '2rem'}}>
             {/* 이미지 생성 폼 */}
             <div className="generation-form" style={{background: 'rgba(168, 85, 247, 0.1)', padding: '2rem', borderRadius: '16px', border: '1px solid var(--accent-purple)'}}>
@@ -1691,235 +981,6 @@ export default function Ecosystem({ language: propLanguage }: EcosystemProps) {
                 <p style={{fontSize: '0.9rem'}}>DALL-E 3, Stable Diffusion, 또는 HuggingFace를 사용하여 이미지를 생성해보세요!</p>
               </div>
             )}
-          </div>
-        )}
-
-            {productivitySubTab === 'presentations' && (
-          <div className="generation-panel">
-            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', marginBottom: '2rem'}}>
-              <div>
-                <h3 style={{color: 'var(--accent-blue)', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.8rem'}}>
-                  <LayoutGrid size={24} /> 프레젠테이션 생성
-                </h3>
-                <div style={{marginBottom: '1rem'}}>
-                  <label style={{display: 'block', fontSize: '0.85rem', color: '#999', marginBottom: '0.4rem'}}>주제</label>
-                  <input
-                    type="text"
-                    placeholder="예: 2024년 마케팅 전략"
-                    value={presTitle}
-                    onChange={e => setPresTitle(e.target.value)}
-                    disabled={isGenerating}
-                    style={{width: '100%', padding: '0.8rem', borderRadius: '8px', border: '1px solid rgba(100, 108, 255, 0.3)', background: 'rgba(255,255,255,0.05)', color: '#fff'}}
-                  />
-                </div>
-                <div style={{marginBottom: '1rem'}}>
-                  <label style={{display: 'block', fontSize: '0.85rem', color: '#999', marginBottom: '0.4rem'}}>대상 청중</label>
-                  <select value={presAudience} onChange={e => setPresAudience(e.target.value)} disabled={isGenerating} style={{width: '100%', padding: '0.8rem', borderRadius: '8px', border: '1px solid rgba(100, 108, 255, 0.3)', background: 'rgba(255,255,255,0.05)', color: '#fff', cursor: 'pointer'}}>
-                    <option value="team">팀</option>
-                    <option value="client">클라이언트</option>
-                    <option value="executive">경영진</option>
-                    <option value="public">대중</option>
-                  </select>
-                </div>
-                <div style={{marginBottom: '1rem'}}>
-                  <label style={{display: 'block', fontSize: '0.85rem', color: '#999', marginBottom: '0.4rem'}}>슬라이드 수</label>
-                  <input
-                    type="number"
-                    min="5"
-                    max="50"
-                    value={presSlides}
-                    onChange={e => setPresSlides(e.target.value)}
-                    disabled={isGenerating}
-                    style={{width: '100%', padding: '0.8rem', borderRadius: '8px', border: '1px solid rgba(100, 108, 255, 0.3)', background: 'rgba(255,255,255,0.05)', color: '#fff'}}
-                  />
-                </div>
-                <button
-                  onClick={handleGeneratePresentation}
-                  disabled={isGenerating || !presTitle.trim()}
-                  style={{width: '100%', padding: '0.8rem', background: 'var(--accent-blue)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: isGenerating ? 'not-allowed' : 'pointer', opacity: isGenerating ? 0.5 : 1}}
-                >
-                  {isGenerating ? '생성 중...' : '생성'}
-                </button>
-              </div>
-              <div>
-                <h3 style={{color: '#999', marginBottom: '1rem'}}>생성 이력 ({presentations.length})</h3>
-                <div style={{display: 'flex', flexDirection: 'column', gap: '1rem', maxHeight: '400px', overflowY: 'auto'}}>
-                  {presentations.map(p => (
-                    <div key={p.id} style={{padding: '1rem', background: 'rgba(100, 108, 255, 0.1)', borderRadius: '8px', border: '1px solid rgba(100, 108, 255, 0.3)'}}>
-                      <p style={{fontWeight: 700, marginBottom: '0.5rem'}}>{p.title}</p>
-                      <p style={{fontSize: '0.85rem', color: '#999'}}>📄 {p.slides} 슬라이드</p>
-                      <p style={{fontSize: '0.85rem', color: '#999'}}>📦 {p.size} KB</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-            {productivitySubTab === 'codes' && (
-          <div className="generation-panel">
-            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', marginBottom: '2rem'}}>
-              <div>
-                <h3 style={{color: 'var(--accent-blue)', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.8rem'}}>
-                  <Cpu size={24} /> 코드 생성
-                </h3>
-                <div style={{marginBottom: '1rem'}}>
-                  <label style={{display: 'block', fontSize: '0.85rem', color: '#999', marginBottom: '0.4rem'}}>작업 설명</label>
-                  <textarea
-                    placeholder="예: 사용자 인증 함수 작성"
-                    value={codeTask}
-                    onChange={e => setCodeTask(e.target.value)}
-                    disabled={isGenerating}
-                    style={{width: '100%', minHeight: '120px', padding: '0.8rem', borderRadius: '8px', border: '1px solid rgba(100, 108, 255, 0.3)', background: 'rgba(255,255,255,0.05)', color: '#fff', fontFamily: 'monospace', resize: 'vertical'}}
-                  />
-                </div>
-                <div style={{marginBottom: '1rem'}}>
-                  <label style={{display: 'block', fontSize: '0.85rem', color: '#999', marginBottom: '0.4rem'}}>프로그래밍 언어</label>
-                  <select value={codeLanguage} onChange={e => setCodeLanguage(e.target.value)} disabled={isGenerating} style={{width: '100%', padding: '0.8rem', borderRadius: '8px', border: '1px solid rgba(100, 108, 255, 0.3)', background: 'rgba(255,255,255,0.05)', color: '#fff', cursor: 'pointer'}}>
-                    <option value="python">Python</option>
-                    <option value="javascript">JavaScript</option>
-                    <option value="typescript">TypeScript</option>
-                    <option value="java">Java</option>
-                    <option value="cpp">C++</option>
-                    <option value="rust">Rust</option>
-                  </select>
-                </div>
-                <button
-                  onClick={handleGenerateCode}
-                  disabled={isGenerating || !codeTask.trim()}
-                  style={{width: '100%', padding: '0.8rem', background: 'var(--accent-blue)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: isGenerating ? 'not-allowed' : 'pointer', opacity: isGenerating ? 0.5 : 1}}
-                >
-                  {isGenerating ? '생성 중...' : '생성'}
-                </button>
-              </div>
-              <div>
-                <h3 style={{color: '#999', marginBottom: '1rem'}}>생성 이력 ({codes.length})</h3>
-                <div style={{display: 'flex', flexDirection: 'column', gap: '1rem', maxHeight: '400px', overflowY: 'auto'}}>
-                  {codes.map(c => (
-                    <div key={c.id} style={{padding: '1rem', background: 'rgba(100, 108, 255, 0.1)', borderRadius: '8px', border: '1px solid rgba(100, 108, 255, 0.3)'}}>
-                      <p style={{fontWeight: 700, marginBottom: '0.5rem'}}>{c.task.substring(0, 30)}...</p>
-                      <p style={{fontSize: '0.85rem', color: '#999'}}>💬 {c.language}</p>
-                      <code style={{fontSize: '0.75rem', color: 'var(--accent-blue)', display: 'block', marginTop: '0.5rem', whiteSpace: 'pre-wrap', wordBreak: 'break-word'}}>
-                        {c.code.substring(0, 100)}...
-                      </code>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-            {productivitySubTab === 'documents' && (
-          <div className="generation-panel">
-            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', marginBottom: '2rem'}}>
-              <div>
-                <h3 style={{color: 'var(--accent-blue)', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.8rem'}}>
-                  <Database size={24} /> 문서 생성
-                </h3>
-                <div style={{marginBottom: '1rem'}}>
-                  <label style={{display: 'block', fontSize: '0.85rem', color: '#999', marginBottom: '0.4rem'}}>주제</label>
-                  <input
-                    type="text"
-                    placeholder="예: 클라우드 컴퓨팅 가이드"
-                    value={docTopic}
-                    onChange={e => setDocTopic(e.target.value)}
-                    disabled={isGenerating}
-                    style={{width: '100%', padding: '0.8rem', borderRadius: '8px', border: '1px solid rgba(100, 108, 255, 0.3)', background: 'rgba(255,255,255,0.05)', color: '#fff'}}
-                  />
-                </div>
-                <div style={{marginBottom: '1rem'}}>
-                  <label style={{display: 'block', fontSize: '0.85rem', color: '#999', marginBottom: '0.4rem'}}>문서 형식</label>
-                  <select value={docType} onChange={e => setDocType(e.target.value)} disabled={isGenerating} style={{width: '100%', padding: '0.8rem', borderRadius: '8px', border: '1px solid rgba(100, 108, 255, 0.3)', background: 'rgba(255,255,255,0.05)', color: '#fff', cursor: 'pointer'}}>
-                    <option value="markdown">Markdown</option>
-                    <option value="html">HTML</option>
-                    <option value="pdf">PDF</option>
-                  </select>
-                </div>
-                <div style={{marginBottom: '1rem'}}>
-                  <label style={{display: 'block', fontSize: '0.85rem', color: '#999', marginBottom: '0.4rem'}}>문서 길이</label>
-                  <select value={docLength} onChange={e => setDocLength(e.target.value)} disabled={isGenerating} style={{width: '100%', padding: '0.8rem', borderRadius: '8px', border: '1px solid rgba(100, 108, 255, 0.3)', background: 'rgba(255,255,255,0.05)', color: '#fff', cursor: 'pointer'}}>
-                    <option value="short">짧음 (1-2페이지)</option>
-                    <option value="medium">중간 (3-5페이지)</option>
-                    <option value="long">긴 (6-10페이지)</option>
-                  </select>
-                </div>
-                <button
-                  onClick={handleGenerateDocument}
-                  disabled={isGenerating || !docTopic.trim()}
-                  style={{width: '100%', padding: '0.8rem', background: 'var(--accent-blue)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: isGenerating ? 'not-allowed' : 'pointer', opacity: isGenerating ? 0.5 : 1}}
-                >
-                  {isGenerating ? '생성 중...' : '생성'}
-                </button>
-              </div>
-              <div>
-                <h3 style={{color: '#999', marginBottom: '1rem'}}>생성 이력 ({documents.length})</h3>
-                <div style={{display: 'flex', flexDirection: 'column', gap: '1rem', maxHeight: '400px', overflowY: 'auto'}}>
-                  {documents.map(d => (
-                    <div key={d.id} style={{padding: '1rem', background: 'rgba(100, 108, 255, 0.1)', borderRadius: '8px', border: '1px solid rgba(100, 108, 255, 0.3)'}}>
-                      <p style={{fontWeight: 700, marginBottom: '0.5rem'}}>{d.topic}</p>
-                      <p style={{fontSize: '0.85rem', color: '#999'}}>📋 {d.type}</p>
-                      <p style={{fontSize: '0.75rem', color: '#666', marginTop: '0.5rem'}}>{d.content.substring(0, 80)}...</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-            )}
-          </div>
-        )}
-
-        {activeTab === 'analysis' && (
-          <div className="generation-panel">
-            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', marginBottom: '2rem'}}>
-              <div>
-                <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem'}}>
-                  <img src="/synzora-icon.png" alt="Synzora" style={{width: '24px', height: '24px', objectFit: 'contain'}} />
-                  <h3 style={{color: 'var(--accent-blue)', margin: 0}}>데이터 분석</h3>
-                </div>
-                <div style={{marginBottom: '1rem'}}>
-                  <label style={{display: 'block', fontSize: '0.85rem', color: '#999', marginBottom: '0.4rem'}}>분석 데이터</label>
-                  <textarea
-                    placeholder="분석할 데이터를 입력하세요..."
-                    value={analysisData}
-                    onChange={e => setAnalysisData(e.target.value)}
-                    disabled={isGenerating}
-                    style={{width: '100%', minHeight: '120px', padding: '0.8rem', borderRadius: '8px', border: '1px solid rgba(100, 108, 255, 0.3)', background: 'rgba(255,255,255,0.05)', color: '#fff', fontFamily: 'monospace', resize: 'vertical'}}
-                  />
-                </div>
-                <div style={{marginBottom: '1rem'}}>
-                  <label style={{display: 'block', fontSize: '0.85rem', color: '#999', marginBottom: '0.4rem'}}>분석 유형</label>
-                  <select value={analysisType} onChange={e => setAnalysisType(e.target.value)} disabled={isGenerating} style={{width: '100%', padding: '0.8rem', borderRadius: '8px', border: '1px solid rgba(100, 108, 255, 0.3)', background: 'rgba(255,255,255,0.05)', color: '#fff', cursor: 'pointer'}}>
-                    <option value="summary">요약</option>
-                    <option value="trend">트렌드 분석</option>
-                    <option value="sentiment">감정 분석</option>
-                    <option value="statistical">통계 분석</option>
-                  </select>
-                </div>
-                <button
-                  onClick={handleAnalyzeData}
-                  disabled={isGenerating || !analysisData.trim()}
-                  style={{width: '100%', padding: '0.8rem', background: 'var(--accent-blue)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: isGenerating ? 'not-allowed' : 'pointer', opacity: isGenerating ? 0.5 : 1}}
-                >
-                  {isGenerating ? '분석 중...' : '분석'}
-                </button>
-              </div>
-              <div>
-                <h3 style={{color: '#999', marginBottom: '1rem'}}>분석 결과 ({analysisResults.length})</h3>
-                <div style={{display: 'flex', flexDirection: 'column', gap: '1rem', maxHeight: '400px', overflowY: 'auto'}}>
-                  {analysisResults.map(a => (
-                    <div key={a.id} style={{padding: '1rem', background: 'rgba(100, 108, 255, 0.1)', borderRadius: '8px', border: '1px solid rgba(100, 108, 255, 0.3)'}}>
-                      <p style={{fontWeight: 700, marginBottom: '0.5rem'}}>📈 {a.type}</p>
-                      <p style={{fontSize: '0.85rem', color: '#999'}}>데이터 크기: {a.dataSize} bytes</p>
-                      <p style={{fontSize: '0.85rem', color: 'var(--accent-blue)', marginTop: '0.5rem'}}>📝 {a.summary}</p>
-                      <p style={{fontSize: '0.75rem', color: '#666', marginTop: '0.5rem'}}>{a.analysis.substring(0, 100)}...</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
           </div>
         )}
       </div>
