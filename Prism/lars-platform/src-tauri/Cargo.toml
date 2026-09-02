@@ -1,0 +1,25 @@
+[package]
+name = "lars-desktop"
+version = "0.1.0"
+description = "LARS Code Agent Desktop Control Center"
+authors = ["LARS Inc."]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "1.5", features = [] }
+
+[dependencies]
+tauri = { version = "1.5", features = [ "fs-all", "dialog-all", "system-tray", "global-shortcut", "shell-open", "dialog", "icon-png"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+chrono = "0.4"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+cocoa = "0.24"
+objc = "0.2"
+
+[features]
+# this feature is used for production builds or when `devPath` points to the filesystem
+# DO NOT REMOVE!!
+custom-protocol = ["tauri/custom-protocol"]

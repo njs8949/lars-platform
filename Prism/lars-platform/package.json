@@ -1,0 +1,33 @@
+{
+  "name": "lars-desktop",
+  "version": "1.4.0",
+  "description": "LARS Code Agent Desktop Control Center",
+  "main": "index.html",
+  "scripts": {
+    "dev": "vite",
+    "desktop": "tauri dev",
+    "build": "vite build",
+    "build:desktop": "tauri build",
+    "build:desktop:all": "npm run build && tauri build --target all",
+    "build:desktop:windows": "npm run build && tauri build --target x86_64-pc-windows-msvc",
+    "build:desktop:macos": "npm run build && tauri build --target universal-apple-darwin",
+    "build:desktop:linux": "npm run build && tauri build --target x86_64-unknown-linux-gnu",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^1.5.3",
+    "express": "^5.2.1",
+    "lucide-react": "^1.14.0",
+    "pptxgenjs": "^4.0.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^1.5.9",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@vitejs/plugin-react": "^6.0.3",
+    "typescript": "^5.0.0",
+    "vite": "^8.0.16"
+  }
+}

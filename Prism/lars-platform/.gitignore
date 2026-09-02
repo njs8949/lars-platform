@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+venv/
+.env
+
+# Build output
+dist/
+build/
+*.egg-info/
+__pycache__/
+*.pyc
+
+# Tauri build output
+src-tauri/target/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+.env.local
+
+# Project specific
+.lars/
+.vite/
+audit_logs/
