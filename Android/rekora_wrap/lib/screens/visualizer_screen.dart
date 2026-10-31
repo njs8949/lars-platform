@@ -1164,7 +1164,8 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
   }
 
   Future<void> _pickVehicleImage() async {
-    final picked = await _picker.pickImage(source: ImageSource.gallery);
+    // imageQuality makes image_picker re-encode the photo as JPEG (HEIC originals are rejected by the render API).
+    final picked = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 95);
     if (picked == null) return;
     
     final file = File(picked.path);
