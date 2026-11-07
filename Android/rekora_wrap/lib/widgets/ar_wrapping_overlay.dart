@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
@@ -10,6 +12,9 @@ import '../models.dart';
 import '../app_state.dart';
 import '../config.dart';
 import '../services/OpenAI_image_edit_service.dart';
+import '../services/vehicle_segmentation_service.dart';
+import '../services/native_live_wrap.dart';
+import '../services/full_vehicle_wrap_service.dart';
 import '../l10n.dart';
 import '../theme.dart';
 
@@ -37,6 +42,10 @@ class _ArWrappingOverlayState extends State<ArWrappingOverlay> {
   ArMode _mode = ArMode.liveAI;
   CameraController? _cameraController;
   bool _isCameraReady = false;
+  // Native live camera (Config.nativeLiveWrap): Flutter Texture id and aspect ratio.
+  int? _nativeTextureId;
+  // Display rotation of the phone in quarter turns (0..3). The native texture is always portrait.
+  int _nativeQuarterTurns = 0;
 
   // Wrap Application Settings
   _WrapApplicationMode _wrapMode = _WrapApplicationMode.fullBody;
@@ -53,27 +62,49 @@ class _ArWrappingOverlayState extends State<ArWrappingOverlay> {
   
   ui.Image? _geminiResult;
   bool _isGenerating = false;
+
+  // Live AI: on-device vehicle segmentation drives the color overlay
+  final VehicleSegmentationService _segmentation = VehicleSegmentationService();
+  // Processed live frame (vehicle tinted on-device), shown like the iOS live view.
+  ui.Image? _liveFrameImage;
+  // Server-side vehicle mask + chip, the same inputs the upload apply flow sends.
+  final FullVehicleWrapService _fullWrapService = FullVehicleWrapService();
+
+  // Overlay-local selection. The route's widget props are fixed at push time,
+  // so the overlay tracks its own color/finish choice.
+  WrapColor? _liveWrap;
+  String _liveFinish = 'Satin';
   String _currentStatus = "";
   
   @override
   void initState() {
     super.initState();
+    _liveWrap = widget.selectedWrap;
+    _liveFinish = widget.finish;
     _initCamera();
   }
 
   @override
   void dispose() {
+    _segmentation.close();
+    _liveFrameImage?.dispose();
+    _liveFrameImage = null;
     _cameraController?.dispose();
+    if (Config.nativeLiveWrap) NativeLiveWrap.stop();
     super.dispose();
   }
 
   Future<void> _initCamera() async {
+    if (Config.nativeLiveWrap) {
+      await _startNativeCamera();
+      return;
+    }
     final cameras = await availableCameras();
     if (cameras.isEmpty) return;
 
     _cameraController = CameraController(
       cameras.first,
-      ResolutionPreset.veryHigh,
+      ResolutionPreset.high,
       enableAudio: false,
     );
 
@@ -84,13 +115,41 @@ class _ArWrappingOverlayState extends State<ArWrappingOverlay> {
         _isCameraReady = true;
         _currentStatus = "카메라 준비됨";
       });
+      await _startLiveSegmentation();
     } catch (e) {
       debugPrint("Camera init error: $e");
     }
   }
 
+  Future<void> _startNativeCamera() async {
+    if (_nativeTextureId != null) return;
+    try {
+      NativeLiveWrap.setOrientationListener((degrees) {
+        // Direction is reversed relative to the device rotation, so the quarter turns are mirrored (4 - n).
+        if (mounted) setState(() => _nativeQuarterTurns = (4 - degrees ~/ 90) % 4);
+      });
+      final r = await NativeLiveWrap.start();
+      if (!mounted) {
+        await NativeLiveWrap.stop();
+        return;
+      }
+      setState(() {
+        _nativeTextureId = r.textureId;
+        _isCameraReady = true;
+        _currentStatus = "카메라 준비됨";
+      });
+    } catch (e) {
+      debugPrint("Native camera start error: $e");
+      if (mounted) setState(() => _currentStatus = "카메라를 시작하지 못했습니다");
+    }
+  }
+
   Future<void> _safeExit() async {
     setState(() => _isGenerating = true);
+    if (Config.nativeLiveWrap) {
+      await NativeLiveWrap.stop();
+      _nativeTextureId = null;
+    }
     try {
       if (_cameraController != null) {
         if (_cameraController!.value.isStreamingImages) {
@@ -112,46 +171,213 @@ class _ArWrappingOverlayState extends State<ArWrappingOverlay> {
       _geminiResult = null;
     });
     if (!_isCameraReady) await _initCamera();
+
+    if (newMode == ArMode.liveAI) {
+      await _startLiveSegmentation();
+    } else {
+      await _stopLiveSegmentation();
+      if (mounted) {
+        setState(() {
+          _liveFrameImage?.dispose();
+          _liveFrameImage = null;
+        });
+      }
+    }
+  }
+
+  // ── Live AI: on-device vehicle segmentation (never calls Gemini) ───────────
+  Future<void> _startLiveSegmentation() async {
+    if (Config.nativeLiveWrap) {
+      await _startNativeCamera();
+      return;
+    }
+    final controller = _cameraController;
+    if (!mounted || _mode != ArMode.liveAI || controller == null) return;
+    if (!controller.value.isInitialized || controller.value.isStreamingImages) return;
+    try {
+      final sensorOrientation = controller.description.sensorOrientation;
+      await controller.startImageStream((image) => _onLiveFrame(image, sensorOrientation));
+    } catch (e) {
+      debugPrint("Live segmentation start error: $e");
+    }
+  }
+
+  Future<void> _stopLiveSegmentation() async {
+    if (Config.nativeLiveWrap) {
+      await NativeLiveWrap.stop();
+      _nativeTextureId = null;
+      return;
+    }
+    final controller = _cameraController;
+    if (controller == null || !controller.value.isStreamingImages) return;
+    try {
+      await controller.stopImageStream();
+    } catch (e) {
+      debugPrint("Live segmentation stop error: $e");
+    }
+  }
+
+  void _onLiveFrame(CameraImage image, int sensorOrientation) {
+    if (!mounted || _mode != ArMode.liveAI) return;
+    _segmentation.processFrame(image, sensorOrientation, tint: _liveWrap?.swatch).then((frame) async {
+      if (frame == null || !mounted || _mode != ArMode.liveAI) return;
+      final processed = await _decodeRgba(frame.rgba, frame.width, frame.height);
+      if (!mounted || _mode != ArMode.liveAI) {
+        processed.dispose();
+        return;
+      }
+      setState(() {
+        _liveFrameImage?.dispose();
+        _liveFrameImage = processed;
+      });
+    });
+  }
+
+  Future<ui.Image> _decodeRgba(Uint8List rgba, int width, int height) {
+    final completer = Completer<ui.Image>();
+    ui.decodeImageFromPixels(rgba, width, height, ui.PixelFormat.rgba8888, completer.complete);
+    return completer.future;
   }
 
   Future<void> _onColorSelected(WrapColor wrap, String finish) async {
     widget.onWrapChanged(wrap, finish);
-    setState(() => _geminiResult = null);
-    await _captureAndGeminiPolish(wrap, finish);
+    if (Config.nativeLiveWrap) NativeLiveWrap.setTint(wrap.swatch);
+    setState(() {
+      _liveWrap = wrap;
+      _liveFinish = finish;
+      _geminiResult = null;
+    });
+    // Live AI generates through the same Rekora wrap API as the upload apply flow
+    // (original frame + vehicle mask, composited over the masked area).
+    if (_mode == ArMode.liveAI) {
+      await _captureAndGeminiPolish(wrap, finish);
+    }
+  }
+
+  // ── 2D engine parity (iOS AIWrappingViewModel): upload keeps aspect ratio, sends a
+  // vehicle mask, and composites the generated result only over the masked area.
+  static const int _uploadLongSide = 1280;
+
+  img_lib.Image _fitLongSide(img_lib.Image src, int maxSide) {
+    final longSide = math.max(src.width, src.height);
+    if (longSide <= maxSide) return src;
+    final scale = maxSide / longSide;
+    return img_lib.copyResize(
+      src,
+      width: (src.width * scale).round(),
+      height: (src.height * scale).round(),
+      interpolation: img_lib.Interpolation.average,
+    );
+  }
+
+  /// Binary mask (white = vehicle) at [width] x [height], nearest-sampled from the live mask.
+  Uint8List _maskToPng(VehicleMask mask, int width, int height) {
+    final out = img_lib.Image(width: width, height: height, numChannels: 3);
+    for (var y = 0; y < height; y++) {
+      final my = math.min(mask.height - 1, (y * mask.height / height).floor());
+      for (var x = 0; x < width; x++) {
+        final mx = math.min(mask.width - 1, (x * mask.width / width).floor());
+        final on = mask.confidence[my * mask.width + mx] >= 0.5 ? 255 : 0;
+        out.setPixelRgb(x, y, on, on, on);
+      }
+    }
+    return Uint8List.fromList(img_lib.encodePng(out));
+  }
+
+  /// Server mask (PNG) -> confidence values on the upload frame grid.
+  VehicleMask _maskFromPng(Uint8List png, int width, int height) {
+    final confidence = Float32List(width * height);
+    final decoded = img_lib.decodeImage(png);
+    if (decoded != null) {
+      for (var y = 0; y < height; y++) {
+        final sy = math.min(decoded.height - 1, (y * decoded.height / height).floor());
+        for (var x = 0; x < width; x++) {
+          final sx = math.min(decoded.width - 1, (x * decoded.width / width).floor());
+          final p = decoded.getPixel(sx, sy);
+          confidence[y * width + x] = (p.r.toDouble() + p.g.toDouble() + p.b.toDouble()) / (3 * 255);
+        }
+      }
+    }
+    return VehicleMask(width: width, height: height, confidence: confidence);
+  }
+
+  /// One-color chip image, like the upload flow's synthetic chip.
+  Uint8List _solidChipJpeg(Color color) {
+    final chip = img_lib.Image(width: 64, height: 64, numChannels: 3);
+    final r = (color.r * 255).round();
+    final g = (color.g * 255).round();
+    final b = (color.b * 255).round();
+    for (var y = 0; y < 64; y++) {
+      for (var x = 0; x < 64; x++) {
+        chip.setPixelRgb(x, y, r, g, b);
+      }
+    }
+    return Uint8List.fromList(img_lib.encodeJpg(chip, quality: 95));
+  }
+
+  /// Keeps the original everywhere except the masked vehicle area, which takes the generated pixels.
+  Uint8List _compositeOverOriginal(img_lib.Image original, img_lib.Image generated, VehicleMask mask) {
+    final gen = (generated.width == original.width && generated.height == original.height)
+        ? generated
+        : img_lib.copyResize(
+            generated,
+            width: original.width,
+            height: original.height,
+            interpolation: img_lib.Interpolation.linear,
+          );
+    final out = img_lib.Image.from(original);
+    for (var y = 0; y < original.height; y++) {
+      final my = math.min(mask.height - 1, (y * mask.height / original.height).floor());
+      for (var x = 0; x < original.width; x++) {
+        final mx = math.min(mask.width - 1, (x * mask.width / original.width).floor());
+        final m = mask.confidence[my * mask.width + mx];
+        if (m <= 0) continue;
+        final o = original.getPixel(x, y);
+        final g = gen.getPixel(x, y);
+        out.setPixelRgb(
+          x,
+          y,
+          (o.r * (1 - m) + g.r * m).round(),
+          (o.g * (1 - m) + g.g * m).round(),
+          (o.b * (1 - m) + g.b * m).round(),
+        );
+      }
+    }
+    return Uint8List.fromList(img_lib.encodeJpg(out, quality: 95));
   }
 
   Future<void> _captureAndGeminiPolish([WrapColor? targetWrap, String? targetFinish]) async {
-    final wrap = targetWrap ?? widget.selectedWrap;
-    final finish = targetFinish ?? widget.finish;
+    final wrap = targetWrap ?? _liveWrap;
+    final finish = targetFinish ?? _liveFinish;
     
-    if (_cameraController == null || !_cameraController!.value.isInitialized || _isGenerating) return;
+    final cameraReady = Config.nativeLiveWrap
+        ? _nativeTextureId != null
+        : (_cameraController != null && _cameraController!.value.isInitialized);
+    if (!cameraReady || _isGenerating) return;
     if (wrap == null) return;
 
     setState(() {
       _isGenerating = true;
-      _currentStatus = "제미나이가 고해상도 랩핑을 적용 중입니다...";
+      _currentStatus = "레코라 이미지 엔진이 고해상도 랩핑을 적용 중입니다...";
     });
 
+    // Flutter camera path: pause the frame stream while taking the still. Native path keeps the camera running,
+    // because stopping it would unbind the capture use case (the screen then stays black with a spinner).
+    if (!Config.nativeLiveWrap) await _stopLiveSegmentation();
+
     try {
-      final xFile = await _cameraController!.takePicture();
-      final rawBytes = await xFile.readAsBytes();
+      final Uint8List rawBytes = Config.nativeLiveWrap
+          ? await NativeLiveWrap.takePicture()
+          : await (await _cameraController!.takePicture()).readAsBytes();
       
-      img_lib.Image? image = img_lib.decodeImage(rawBytes);
-      if (image != null) {
-        if (image.width > image.height) {
-          image = img_lib.copyRotate(image, angle: 90);
-        }
-        final targetW = image.width;
-        final targetH = (targetW * 16) ~/ 9;
-        if (image.height > targetH) {
-          image = img_lib.copyCrop(image, x: 0, y: (image.height - targetH) ~/ 2, width: targetW, height: targetH);
-        } else {
-          final newW = (image.height * 9) ~/ 16;
-          image = img_lib.copyCrop(image, x: (image.width - newW) ~/ 2, y: 0, width: newW, height: image.height);
-        }
+      img_lib.Image? decoded = img_lib.decodeImage(rawBytes);
+      if (decoded == null) throw StateError("Captured photo could not be decoded");
+      if (decoded.width > decoded.height) {
+        decoded = img_lib.copyRotate(decoded, angle: 90);
       }
+      final image = _fitLongSide(decoded, _uploadLongSide);
       
-      final processedBytes = image != null ? Uint8List.fromList(img_lib.encodeJpg(image, quality: 95)) : rawBytes;
+      final processedBytes = Uint8List.fromList(img_lib.encodeJpg(image, quality: 92));
 
       final panels = _selectedScopes.join(", ");
       final wheelInstruction = _wrapWheels ? "Include the wheels and rims in the wrap color." : "MANDATORY: DO NOT wrap the wheels, rims, tires, glass, or lights. Keep them original.";
@@ -171,10 +397,12 @@ class _ArWrappingOverlayState extends State<ArWrappingOverlay> {
           break;
       }
 
+      // Direct OpenAI wrap (iOS parity): no mask is sent and no composite is done; the returned image is shown as-is.
       final resultBytes = await _geminiService.applyWrapWithFullPrompt(
         imageBytes: processedBytes,
         maskBytes: Uint8List(0),
         fullPrompt: "$prompt Preserve all natural reflections and highlights for photorealism. Output result ONLY.",
+        targetHex: wrap.hexCode,
       );
 
       final codec = await ui.instantiateImageCodec(resultBytes);
@@ -234,7 +462,22 @@ class _ArWrappingOverlayState extends State<ArWrappingOverlay> {
           children: [
             // LAYER 1: Shared Camera Background
             Positioned.fill(
-              child: _isCameraReady 
+              child: _isCameraReady && Config.nativeLiveWrap && _nativeTextureId != null
+                ? ClipRect(
+                    child: FittedBox(
+                      fit: BoxFit.cover,
+                      child: SizedBox(
+                        // Portrait content (720x1280). Quarter turns swap the box, so the content is never stretched.
+                        width: _nativeQuarterTurns.isOdd ? 1280 : 720,
+                        height: _nativeQuarterTurns.isOdd ? 720 : 1280,
+                        child: RotatedBox(
+                          quarterTurns: _nativeQuarterTurns,
+                          child: Texture(textureId: _nativeTextureId!),
+                        ),
+                      ),
+                    ),
+                  )
+                : _isCameraReady && !Config.nativeLiveWrap
                 ? ClipRect(
                     child: OverflowBox(
                       alignment: Alignment.center,
@@ -251,13 +494,11 @@ class _ArWrappingOverlayState extends State<ArWrappingOverlay> {
                 : const Center(child: CircularProgressIndicator(color: Colors.white)),
             ),
 
-            // LAYER 2: Instant Color Tint
-            if (_mode == ArMode.liveAI && widget.selectedWrap != null && _geminiResult == null)
+            // LAYER 2: Processed live frame with the vehicle tinted on-device (iOS-equivalent).
+            if (_mode == ArMode.liveAI && _liveFrameImage != null && _geminiResult == null)
               Positioned.fill(
                 child: IgnorePointer(
-                  child: Container(
-                    color: widget.selectedWrap!.swatch.withOpacity(0.20),
-                  ),
+                  child: RawImage(image: _liveFrameImage, fit: BoxFit.cover),
                 ),
               ),
 
@@ -271,7 +512,10 @@ class _ArWrappingOverlayState extends State<ArWrappingOverlay> {
             if (_geminiResult != null)
               Positioned.fill(
                 child: GestureDetector(
-                  onTap: () => setState(() => _geminiResult = null),
+                  onTap: () {
+                    setState(() => _geminiResult = null);
+                    _startLiveSegmentation();
+                  },
                   child: RawImage(image: _geminiResult, fit: BoxFit.cover),
                 ),
               ),
@@ -300,7 +544,7 @@ class _ArWrappingOverlayState extends State<ArWrappingOverlay> {
                       children: [
                         const CircularProgressIndicator(color: Colors.purpleAccent, strokeWidth: 4),
                         const SizedBox(height: 25),
-                        Text(l10n.tx("제미나이가 정교하게 랩핑 중...", "Gemini is wrapping with detail..."), 
+                        Text(l10n.tx("레코라 이미지 엔진이 정교하게 랩핑 중...", "Rekora image engine is wrapping with detail..."), 
                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
                       ],
                     ),
@@ -314,20 +558,20 @@ class _ArWrappingOverlayState extends State<ArWrappingOverlay> {
   }
 
   Widget _buildVirtual3DView() {
-    final color = widget.selectedWrap?.swatch ?? Colors.white;
+    final color = _liveWrap?.swatch ?? Colors.white;
     final r = color.red / 255.0;
     final g = color.green / 255.0;
     final b = color.blue / 255.0;
-    
+
     double metallic = 0.5;
     double roughness = 0.4;
-    if (widget.finish.toLowerCase() == 'gloss') { metallic = 0.2; roughness = 0.05; }
-    if (widget.finish.toLowerCase() == 'matte') { metallic = 0.0; roughness = 0.9; }
-    if (widget.finish.toLowerCase() == 'satin') { metallic = 0.1; roughness = 0.4; }
-    if (widget.finish.toLowerCase() == 'metallic') { metallic = 0.8; roughness = 0.2; }
+    if (_liveFinish.toLowerCase() == 'gloss') { metallic = 0.2; roughness = 0.05; }
+    if (_liveFinish.toLowerCase() == 'matte') { metallic = 0.0; roughness = 0.9; }
+    if (_liveFinish.toLowerCase() == 'satin') { metallic = 0.1; roughness = 0.4; }
+    if (_liveFinish.toLowerCase() == 'metallic') { metallic = 0.8; roughness = 0.2; }
 
     return ModelViewer(
-      key: ValueKey("3d-final-v2-${widget.selectedWrap?.id}-${widget.finish}-$_wrapWheels"),
+      key: ValueKey("3d-final-v2-${_liveWrap?.id}-$_liveFinish-$_wrapWheels"),
       src: 'https://modelviewer.dev/shared-assets/models/Astronaut.glb', 
       alt: "Virtual Vehicle",
       ar: true,
@@ -549,9 +793,9 @@ class _ArWrappingOverlayState extends State<ArWrappingOverlay> {
               separatorBuilder: (_, __) => const SizedBox(width: 15),
               itemBuilder: (context, index) {
                 final w = wraps[index];
-                final selected = widget.selectedWrap?.id == w.id;
+                final selected = _liveWrap?.id == w.id;
                 return GestureDetector(
-                  onTap: () => _onColorSelected(w, widget.finish),
+                  onTap: () => _onColorSelected(w, _liveFinish),
                   child: Column(
                     children: [
                       Container(
@@ -579,9 +823,12 @@ class _ArWrappingOverlayState extends State<ArWrappingOverlay> {
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: ['Gloss', 'Matte', 'Satin', 'Metallic'].map((f) {
-              final active = widget.finish == f;
+              final active = _liveFinish == f;
               return GestureDetector(
-                onTap: () => _onColorSelected(widget.selectedWrap!, f),
+                onTap: () {
+                  final current = _liveWrap;
+                  if (current != null) _onColorSelected(current, f);
+                },
                 child: Container(
                   margin: const EdgeInsets.symmetric(horizontal: 6),
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
@@ -594,9 +841,11 @@ class _ArWrappingOverlayState extends State<ArWrappingOverlay> {
               );
             }).toList(),
           ),
-          const SizedBox(height: 30),
-          ElevatedButton(
-            onPressed: widget.selectedWrap != null ? () => _captureAndGeminiPolish() : null,
+          // The live AI mode applies the wrap as soon as a colour or finish is picked, so the apply button is hidden there.
+          if (_mode != ArMode.liveAI) ...[
+            const SizedBox(height: 30),
+            ElevatedButton(
+            onPressed: _liveWrap != null ? () => _captureAndGeminiPolish() : null,
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.white, 
               foregroundColor: Colors.black, 
@@ -606,6 +855,7 @@ class _ArWrappingOverlayState extends State<ArWrappingOverlay> {
             ),
             child: Text(l10n.tx("AI 랩핑 적용", "Apply AI Wrap"), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 17)),
           ),
+          ],
         ],
       ),
     );

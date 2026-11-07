@@ -1,5 +1,12 @@
 /// Backend endpoints (set via --dart-define when running or building).
 class Config {
+  /// Live AI camera runs natively (CameraX + ML Kit + GL, Flutter Texture) instead of the Flutter camera plugin.
+  static const bool nativeLiveWrap = bool.fromEnvironment('NATIVE_LIVE_WRAP', defaultValue: true);
+
+  /// AI wrap runs on the backend (POST /wrap on wrap-api): SAM mask, OpenAI edit and geometry restore happen there.
+  /// When false, the app uses the older proxy path (padded frame + /api/openai-wrap).
+  static const useBackendWrap = bool.fromEnvironment('USE_BACKEND_WRAP', defaultValue: true);
+
   static const backendBaseUrl = String.fromEnvironment(
     'BACKEND_BASE_URL',
     defaultValue: 'https://rekora.lars-technologies.com',
@@ -8,6 +15,18 @@ class Config {
   static const backendBaseUrlCellular = String.fromEnvironment(
     'BACKEND_BASE_URL_CELLULAR',
     defaultValue: 'https://rekora.lars-technologies.com',
+  );
+
+  /// SAM 3 mask-job backend (EC2, Seoul). Used only for /mask-jobs and /mask-jobs/warmup.
+  static const maskBackendBaseUrl = String.fromEnvironment(
+    'MASK_BACKEND_BASE_URL',
+    defaultValue: 'https://wrap-api.lars-technologies.com',
+  );
+
+  /// Python wrap backend (EC2, Seoul). Hosts /generate-wrapped-image, the fallback render.
+  static const wrapBackendBaseUrl = String.fromEnvironment(
+    'WRAP_BACKEND_BASE_URL',
+    defaultValue: 'https://wrap-api.lars-technologies.com',
   );
 
   static const wrapApplyPath = String.fromEnvironment(

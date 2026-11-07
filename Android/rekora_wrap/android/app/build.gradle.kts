@@ -64,7 +64,14 @@ android {
 
 dependencies {
     implementation("androidx.core:core-splashscreen:1.0.1")
-    implementation("com.android.billingclient:billing:7.0.0")
+    implementation("com.android.billingclient:billing:9.1.0")
+    // Native live wrap pipeline (CameraX preview -> ML Kit subject mask -> GL colour blend -> Flutter Texture).
+    // Versions match the ones already resolved by the Flutter camera plugin and ML Kit subject segmentation.
+    implementation("androidx.camera:camera-core:1.5.3")
+    implementation("androidx.camera:camera-camera2:1.5.3")
+    implementation("androidx.camera:camera-lifecycle:1.5.3")
+    implementation("com.google.guava:guava:33.4.8-android")
+    implementation("com.google.android.gms:play-services-mlkit-subject-segmentation:16.0.0-beta1")
 }
 flutter {
     source = "../.."

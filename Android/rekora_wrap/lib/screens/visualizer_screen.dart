@@ -8,6 +8,7 @@ import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
+import '../services/wrap_events.dart';
 import '../app_state.dart';
 import '../config.dart';
 import '../l10n.dart';
@@ -38,6 +39,9 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
   final _picker = ImagePicker();
   final _promptController = TextEditingController();
   final _canvasTransformController = TransformationController();
+  final GlobalKey _canvasImageKey = GlobalKey();
+  Size? _vehicleImageSize;
+  List<double>? _tapPoint;
   final _fullWrapService = FullVehicleWrapService(backendBaseUrl: Config.backendBaseUrl);
   final _chipAnalyzer = ColorChipAnalyzer();
   final _aiViewerService = AiViewerService();
@@ -59,11 +63,14 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
   String? _secondaryChipHex;
   String _secondaryFinish = 'Gloss';
   String _secondaryFinishPrompt = 'Gloss';
+  DateTime? _wrapStartedAt;
+  // SAM 3 only produces the mask. Colour is applied by the OpenAI router; the deterministic recolour is optional.
+  static const bool _useDeterministicRecolor = false;
   bool _generating = false;
   String _generatingStatus = '';
   AiPreviewResult? _preview;
   bool _proAdvancedEngineEnabled = false;
-  final Set<String> _expanded = {"material", "color", "ai"};
+  final Set<String> _expanded = {"color", "ai"};
   bool _captureGuideExpanded = true;
   bool _wrapPanelExpanded = true;
   bool _optionsPanelExpanded = true;
@@ -74,6 +81,13 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
   _WeatherPreset _weatherPreset = _WeatherPreset.clear;
   _TimeOfDayPreset _timeOfDayPreset = _TimeOfDayPreset.day;
   _BackgroundPreset _backgroundPreset = _BackgroundPreset.original;
+
+  @override
+  void initState() {
+    super.initState();
+    // Wake the SAM 3 GPU endpoint now so the mask job after capture is not a cold start.
+    _fullWrapService.warmUpMaskEndpoint();
+  }
 
   @override
   void dispose() {
@@ -116,8 +130,6 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
             ),
           ),
           
-          if (_generating)
-            _ModernStudioLoader(status: _generatingStatus),
         ],
       ),
     );
@@ -139,6 +151,38 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
             tooltip: l10n.notificationsTooltip,
             icon: Icon(Icons.notifications_none_rounded, color: WrapTheme.primary, size: 32),
             onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const NotificationsScreen())),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Loading state shown inside the preview canvas (AI wrap / calibration progress).
+  Widget _buildCanvasLoadingOverlay() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.88),
+        borderRadius: BorderRadius.circular(44),
+      ),
+      alignment: Alignment.center,
+      padding: const EdgeInsets.symmetric(horizontal: 32),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(
+            width: 44,
+            height: 44,
+            child: CircularProgressIndicator(strokeWidth: 3, color: Color(0xFF4F378A)),
+          ),
+          const SizedBox(height: 18),
+          Text(
+            _generatingStatus.isEmpty ? 'AI 랩핑 처리 중...' : _generatingStatus,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF4F378A),
+            ),
           ),
         ],
       ),
@@ -171,7 +215,10 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
                       transformationController: _canvasTransformController,
                       minScale: 1,
                       maxScale: 4,
-                      child: AnimatedRotation(
+                      child: GestureDetector(
+                        onTapUp: (d) => _onCanvasTap(d.localPosition),
+                        child: AnimatedRotation(
+                        key: _canvasImageKey,
                         turns: _anglePreset.turns,
                         duration: const Duration(milliseconds: 240),
                         curve: Curves.easeOutCubic,
@@ -182,6 +229,7 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
                           width: double.infinity,
                           height: double.infinity,
                         ),
+                      ),
                       ),
                     ),
                   ),
@@ -195,6 +243,9 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
                 child: const Center(child: CircularProgressIndicator(color: Color(0xFF4F378A))),
               ),
             ),
+
+          if (_generating)
+            Positioned.fill(child: _buildCanvasLoadingOverlay()),
           
           if (_vehicleImage != null)
             Positioned(
@@ -237,6 +288,12 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
                           onWrapChanged: (wrap, finish) {
                             setState(() {
                               _selectedWrap = wrap;
+                              // The AI prompt reads the target color from _chipColor/_chipHex, so a wrap picked here
+                              // must update them too (otherwise the car's own color was sent as the target).
+                              if (wrap != null) {
+                                _chipColor = wrap.swatch;
+                                _chipHex = _hexFromColor(wrap.swatch);
+                              }
                               _finish = finish;
                             });
                           },
@@ -546,8 +603,6 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
                 const SizedBox(height: 24),
                 _buildStatusIndicator(context, l10n),
                 const SizedBox(height: 32),
-                _buildEnvironmentSummary(context, l10n),
-                const SizedBox(height: 24),
                 _buildOptionsPanel(context, l10n),
               ],
             ),
@@ -624,18 +679,6 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
             duration: const Duration(milliseconds: 220),
             firstChild: Column(
               children: [
-                _buildAccordionSection(
-                  "application",
-                  Icons.auto_fix_high_rounded,
-                  l10n.tx('랩핑 방식', 'Wrap Strategy'),
-                  _buildWrapApplicationOptions(context, l10n),
-                ),
-                _buildAccordionSection(
-                  "material",
-                  Icons.layers_rounded,
-                  l10n.materialFinishTitle,
-                  _buildMaterialPills(),
-                ),
                 _buildAccordionSection(
                   "color",
                   Icons.palette_rounded,
@@ -943,10 +986,33 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
     );
   }
 
+  Widget _buildAdvancedSubtitle(String text) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Text(
+          text,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w800,
+            color: Theme.of(context).colorScheme.onSurface,
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildAdvancedOptions() {
     final l10n = L10n.of(context);
     return Column(
       children: [
+        _buildAdvancedSubtitle(l10n.tx('랩핑 방식', 'Wrap Strategy')),
+        _buildWrapApplicationOptions(context, l10n),
+        const SizedBox(height: 18),
+        _buildAdvancedSubtitle(l10n.materialFinishTitle),
+        _buildMaterialPills(),
+        const Divider(height: 28),
         SwitchListTile(
           title: Text(l10n.includeChromeDelete, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
           value: _includeChromeDelete,
@@ -1041,61 +1107,6 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
     );
   }
 
-  Widget _buildEnvironmentSummary(BuildContext context, L10n l10n) {
-    return Wrap(
-      alignment: WrapAlignment.center,
-      spacing: 10,
-      runSpacing: 10,
-      children: [
-        _buildEnvironmentChip(
-          context,
-          icon: Icons.cloud_queue_rounded,
-          label: '${l10n.tx('날씨', 'Weather')} · ${_weatherLabel(l10n, _weatherPreset)}',
-        ),
-        _buildEnvironmentChip(
-          context,
-          icon: Icons.schedule_rounded,
-          label: '${l10n.tx('시간대', 'Time')} · ${_timeOfDayLabel(l10n, _timeOfDayPreset)}',
-        ),
-        _buildEnvironmentChip(
-          context,
-          icon: Icons.public_rounded,
-          label: '${l10n.tx('배경', 'Backdrop')} · ${_backgroundLabel(l10n, _backgroundPreset)}',
-        ),
-      ],
-    );
-  }
-
-  Widget _buildEnvironmentChip(
-    BuildContext context, {
-    required IconData icon,
-    required String label,
-  }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: WrapTheme.background(context),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: WrapTheme.border(context)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 16, color: WrapTheme.primary),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w800,
-              color: Theme.of(context).colorScheme.onSurface,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildMainActionButtons(BuildContext context, L10n l10n) {
     return Column(
       children: [
@@ -1121,6 +1132,20 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
         ),
         if (_preview?.generatedImage != null) ...[
           const SizedBox(height: 14),
+          Text(
+            l10n.tx(
+              'Rekora Image Generator로 생성된 참고용 이미지입니다. 실제 필름과 색상 차이가 있을 수 있습니다.',
+              'Generated with Rekora Image Generator for reference only. Colors may differ from the actual film.',
+            ),
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              height: 1.4,
+              color: WrapTheme.mutedText(context),
+            ),
+          ),
+          const SizedBox(height: 12),
           SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(
@@ -1308,6 +1333,13 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
     setState(() {
       _generating = true;
       _generatingStatus = 'AI 랩핑 엔진 분석 중...';
+      _wrapStartedAt = DateTime.now();
+      WrapEvents.log('wrap_started', props: {
+        'target': 'exterior',
+        'target_hex': _chipHex ?? _hexFromColor(_chipColor ?? Colors.grey),
+        'selected_wrap': _selectedWrap?.name ?? '',
+        'wrap_mode': _wrapMode.name,
+      });
     });
 
     try {
@@ -1316,55 +1348,6 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
           : _promptController.text.trim();
       final promptText = _buildRenderPrompt(basePromptText);
       final selectedParts = _selectedPartsForRequest();
-
-      try {
-        final preview = await _aiViewerService.generatePreview(
-          vehicleImage: _vehicleImage,
-          chipImage: null,
-          chipColor: _chipColor ?? _selectedWrap?.swatch ?? Colors.grey,
-          prompt: promptText.isEmpty ? null : promptText,
-          selectedParts: selectedParts,
-          finish: _finishPrompt,
-          sku: _selectedWrap?.displayCode,
-          brand: _selectedWrap?.brand,
-          productName: _selectedWrap?.name,
-          precomputedMask: _maskBytes,
-          modelOverride: state.preferredImageModel,
-          pbrAssets: _chipCalibration?.pbrAssets,
-        );
-        File? previewFile = preview.generatedImage;
-        if (preview.generatedImage != null) {
-          final generatedBytes = await preview.generatedImage!.readAsBytes();
-          final mergedBytes = _shouldPreserveOriginalBackground
-              ? await _mergePreviewWithOriginalBackground(generatedBytes)
-              : generatedBytes;
-          previewFile = await _writePreviewTempFile(mergedBytes);
-        }
-
-        if (!mounted) return;
-        setState(() {
-          _preview = AiPreviewResult(
-            primary: preview.primary,
-            secondary: preview.secondary,
-            caption: preview.caption,
-            generatedImage: previewFile,
-            metadata: preview.metadata,
-            generationMethod: preview.generationMethod,
-            diagnostics: preview.diagnostics,
-          );
-          _generating = false;
-        });
-        state.recordAiWrapUsed();
-        _recordGarageWrapHistory(state);
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text(successMessage),
-          ),
-        );
-        return;
-      } catch (primaryError) {
-        debugPrint('[Visualizer] Primary wrap pipeline failed, falling back: $primaryError');
-      }
 
       final imageBytes = await _vehicleImage!.readAsBytes();
       
@@ -1384,48 +1367,107 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
       );
 
       // 마스크 데이터와 함께 랩핑 요청 (제미나이에게 정확한 가이드 제공)
-      final result = await _fullWrapService.renderLayeredWrap(
-        imageBytes: imageBytes,
-        maskBytes: _maskBytes,
-        wrapColor: wrapColor,
-        quality: RenderQuality.finalRender,
-        scenario: _mapScenarioFromEnvironment(),
-        selectedScopes: _selectedScopesForFallback(),
-        promptText: promptText.isEmpty ? wrapColor.aiPrompt : promptText,
-        vehicleHash: _vehicleImage!.path,
-      );
+      // Default path: deterministic recolour on the backend. Only masked pixels change colour; shape, glass,
+      // wheels and background stay identical. The OpenAI path below runs only when this is unavailable.
+      Uint8List? recolorMask = _maskBytes;
+      if (_useDeterministicRecolor && recolorMask == null) {
+        // Backend mode: the app skips segmentation on pick, so fetch the mask only for this path.
+        try {
+          recolorMask = (await _fullWrapService.segmentVehicle(imageBytes, point: _tapPoint)).mask;
+        } catch (_) {}
+      }
+      if (_useDeterministicRecolor && recolorMask != null && recolorMask.isNotEmpty) {
+        try {
+          final recoloredBytes = await _fullWrapService.recolorVehicle(
+            imageBytes: imageBytes,
+            maskBytes: recolorMask,
+            hex: _hexFromColor(wrapColor.swatch),
+            finish: _finishPrompt,
+          );
+          final resultFile = await _writePreviewTempFile(recoloredBytes);
+          if (!mounted) return;
+          setState(() {
+            _preview = AiPreviewResult(
+              generatedImage: resultFile,
+              primary: wrapColor.swatch,
+              secondary: wrapColor.swatch,
+              caption: 'AI Wrap Result',
+              generationMethod: 'Deterministic recolor',
+            );
+            _generating = false;
+          });
+          state.recordAiWrapUsed();
+          _recordGarageWrapHistory(state);
+          messenger.showSnackBar(SnackBar(content: Text(successMessage)));
+          return;
+        } catch (e) {
+          debugPrint('[Visualizer] Recolor unavailable, using OpenAI path: $e');
+        }
+      }
 
-      // 이미지가 정상 생성됐다면 성공으로 본다.
-      // 백엔드가 다른 render_source 문자열을 주더라도 사용자에게 실패로 오인시키지 않는다.
-      debugPrint(
-        '[Visualizer] Wrap render succeeded via ${result.renderSource ?? "unknown"}'
-        '${result.vertexError == null ? "" : " (note: ${result.vertexError})"}',
-      );
-
-      final mergedBytes = _shouldPreserveOriginalBackground
-          ? await _mergePreviewWithOriginalBackground(result.imageBytes)
-          : result.imageBytes;
-      final resultFile = await _writePreviewTempFile(mergedBytes);
-
-      setState(() {
-        _preview = AiPreviewResult(
-          generatedImage: resultFile, 
-          primary: wrapColor.swatch,
-          secondary: wrapColor.swatch,
-          caption: 'AI Wrap Result',
+      // iOS-parity pipeline: SAM mask + photo -> OpenAI router -> applied check -> mask composite.
+      // Any failure falls through to the layered render fallback below (proxy -> wrap-api).
+      Uint8List? aiBytes;
+      // Stage timing for measurement: the OpenAI call only (the mask was prepared before this step).
+      final maskCached = _maskBytes != null;
+      int openaiMs = 0;
+      final openaiStart = DateTime.now();
+      try {
+        final candidate = await _aiViewerService.generateOpenAiMaskedWrap(
+          vehicleImage: _vehicleImage!,
+          chipColor: _chipColor ?? _selectedWrap?.swatch ?? Colors.grey,
+          prompt: promptText.isEmpty ? null : promptText,
+          selectedParts: selectedParts,
+          finish: _finishPrompt,
+          sku: _selectedWrap?.displayCode,
+          brand: _selectedWrap?.brand,
+          productName: _selectedWrap?.name,
+          mask: _maskBytes,
         );
-        _generating = false;
-      });
-      state.recordAiWrapUsed();
-      _recordGarageWrapHistory(state);
-      
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(successMessage),
-        ),
-      );
-      
+        openaiMs = DateTime.now().difference(openaiStart).inMilliseconds;
+        // Backend pipeline: the server already restored the original outside the car body, so the result is
+        // used as is (no second masking here, which could erase the colour when the app-side mask is weak).
+        if (Config.useBackendWrap || _maskBytes == null || _wrapVisiblyApplied(imageBytes, candidate, _maskBytes!)) {
+          aiBytes = candidate;
+        } else {
+          debugPrint('[Visualizer] OpenAI result shows no color change in the mask; using fallback render');
+        }
+      } catch (e) {
+        debugPrint('[Visualizer] OpenAI router failed; using fallback render: $e');
+      }
+      if (aiBytes != null) {
+        final mergedBytes = Config.useBackendWrap
+            ? aiBytes
+            : await _mergePreviewWithOriginalBackground(aiBytes);
+        final resultFile = await _writePreviewTempFile(mergedBytes);
+        if (!mounted) return;
+        setState(() {
+          _preview = AiPreviewResult(
+            generatedImage: resultFile,
+            primary: wrapColor.swatch,
+            secondary: wrapColor.swatch,
+            caption: 'AI Wrap Result',
+            generationMethod: 'OpenAI router (mask)',
+          );
+          _generating = false;
+        });
+        state.recordAiWrapUsed();
+        _recordGarageWrapHistory(state);
+        WrapEvents.log('wrap_completed', props: {
+          'target_hex': _chipHex ?? _hexFromColor(_chipColor ?? Colors.grey),
+          'duration_ms': DateTime.now().difference(_wrapStartedAt ?? DateTime.now()).inMilliseconds,
+          'openai_ms': openaiMs,
+          'mask_cached': maskCached,
+          'route': 'openai_padded',
+        });
+        messenger.showSnackBar(SnackBar(content: Text(successMessage)));
+        return;
+      }
+
+      // OpenAI router only: no Gemini-based render fallback. A failed generation is reported to the user.
+      throw StateError('OpenAI 라우터에서 결과를 받지 못했습니다. 다시 시도해 주세요.');
     } catch (e) {
+      WrapEvents.log('wrap_failed', props: {'duration_ms': DateTime.now().difference(_wrapStartedAt ?? DateTime.now()).inMilliseconds, 'error': '$e'});
       setState(() => _generating = false);
       messenger.showSnackBar(
         SnackBar(
@@ -1444,6 +1486,31 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
     final resultFile = File(tempPath);
     await resultFile.writeAsBytes(bytes, flush: true);
     return resultFile;
+  }
+
+  /// iOS parity: mean RGB difference inside the mask (64x64 samples). Small difference = color not applied.
+  bool _wrapVisiblyApplied(Uint8List original, Uint8List generated, Uint8List mask) {
+    const side = 64;
+    final o = img.decodeImage(original);
+    final g = img.decodeImage(generated);
+    final m = img.decodeImage(mask);
+    if (o == null || g == null || m == null) return true;
+    final os = img.copyResize(o, width: side, height: side);
+    final gs = img.copyResize(g, width: side, height: side);
+    final ms = img.copyResize(m, width: side, height: side, interpolation: img.Interpolation.nearest);
+    double total = 0;
+    var count = 0;
+    for (var y = 0; y < side; y++) {
+      for (var x = 0; x < side; x++) {
+        if (img.getLuminance(ms.getPixel(x, y)) < 128) continue;
+        final a = os.getPixel(x, y);
+        final b = gs.getPixel(x, y);
+        total += (a.r - b.r).abs().toDouble() + (a.g - b.g).abs().toDouble() + (a.b - b.b).abs().toDouble();
+        count++;
+      }
+    }
+    if (count == 0) return true;
+    return total / (count * 3) >= 6.0;
   }
 
   Future<Uint8List> _mergePreviewWithOriginalBackground(Uint8List generatedBytes) async {
@@ -1474,15 +1541,27 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
         interpolation: img.Interpolation.nearest,
       );
 
+      // A hard mask edge pastes the model's regenerated background (which never matches the
+      // original pixel-for-pixel) as a seam along the body outline. Blur the mask and only let
+      // the solid interior take generated pixels, so the boundary falls back to the original.
+      final alphaMap = img.Image(width: original.width, height: original.height);
+      for (var y = 0; y < original.height; y++) {
+        for (var x = 0; x < original.width; x++) {
+          if (!sizedMask.contains(x, y)) continue;
+          final coverage = img.getLuminance(sizedMask.sample(x, y));
+          alphaMap.setPixelRgb(x, y, coverage, coverage, coverage);
+        }
+      }
+      final softMask = img.gaussianBlur(alphaMap, radius: 4);
+
       final output = img.Image.from(original);
       for (var y = 0; y < original.height; y++) {
         for (var x = 0; x < original.width; x++) {
-          if (!sizedGenerated.contains(x, y) || !sizedMask.contains(x, y)) {
+          if (!sizedGenerated.contains(x, y)) {
             continue;
           }
-          final maskPixel = sizedMask.sample(x, y);
-          final coverage = (img.getLuminance(maskPixel) / 255.0).clamp(0.0, 1.0);
-          final alpha = coverage <= 0.04 ? 0.0 : ((coverage - 0.04) / 0.96).clamp(0.0, 1.0);
+          final edge = (softMask.getPixel(x, y).r / 255.0).clamp(0.0, 1.0);
+          final alpha = ((edge - 0.3) / 0.6).clamp(0.0, 1.0);
           if (alpha == 0.0) continue;
 
           final src = sizedGenerated.sample(x, y);
@@ -1984,18 +2063,65 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
     }
   }
 
+  /// Tap on the car to pick it. The tap is mapped from the screen onto the photo, then the mask is redone for that car.
+  Future<void> _onCanvasTap(Offset local) async {
+    final imageSize = _vehicleImageSize;
+    final box = _canvasImageKey.currentContext?.findRenderObject() as RenderBox?;
+    final file = _vehicleImage;
+    if (imageSize == null || box == null || file == null || _segmenting || _generating) return;
+    if (!_canvasTransformController.value.isIdentity() || _anglePreset != _AnglePreset.front) return;
+    final size = box.size;
+    final scale = min(size.width / imageSize.width, size.height / imageSize.height);
+    final drawnW = imageSize.width * scale;
+    final drawnH = imageSize.height * scale;
+    final offsetX = (size.width - drawnW) / 2;
+    final offsetY = (size.height - drawnH) / 2;
+    final nx = (local.dx - offsetX) / drawnW;
+    final ny = (local.dy - offsetY) / drawnH;
+    if (nx < 0 || nx > 1 || ny < 0 || ny > 1) return;
+    setState(() {
+      _tapPoint = [nx, ny];
+      _segmenting = true;
+      _preview = null;
+      _maskBytes = null;
+    });
+    try {
+      final bytes = await file.readAsBytes();
+      final result = await _fullWrapService.segmentVehicle(bytes, point: [nx, ny]);
+      if (!mounted) return;
+      setState(() {
+        _maskBytes = result.mask;
+        _segmenting = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _segmenting = false);
+    }
+  }
+
   Future<void> _setVehicleImage(File file) async {
     setState(() {
       _vehicleImage = file;
       _preview = null;
       _maskBytes = null;
+      _tapPoint = null;
       _segmenting = true;
       _anglePreset = _AnglePreset.front;
       _canvasTransformController.value = Matrix4.identity();
     });
 
+    if (Config.useBackendWrap) {
+      // The server makes the vehicle mask once during the wrap (SAM), so the app does not segment here.
+      if (mounted) setState(() => _segmenting = false);
+      return;
+    }
+
     try {
       final bytes = await file.readAsBytes();
+      try {
+        final codec = await ui.instantiateImageCodec(bytes);
+        final frame = await codec.getNextFrame();
+        _vehicleImageSize = Size(frame.image.width.toDouble(), frame.image.height.toDouble());
+      } catch (_) {}
       final result = await _fullWrapService.segmentVehicle(bytes);
       if (!mounted) return;
       setState(() {
@@ -2037,7 +2163,7 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
         _finishPrompt = _resolveFinishPrompt(pendingWrap.finish);
         _promptController.text = pendingWrap.designHubPrompt;
         _expanded.add("color");
-        _expanded.add("material");
+        _expanded.add("advanced");
       });
     }
 
@@ -2058,12 +2184,14 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
           _promptController.text = garageLaunch.promptText.trim();
         }
         _expanded.add("color");
-        _expanded.add("material");
+        _expanded.add("advanced");
         _expanded.add("ai");
       });
     }
 
-    if (currentVehicleImage != null && _vehicleImage == null) {
+    final forceAssistantPhoto = state.assistantPhotoPending;
+    state.assistantPhotoPending = false;
+    if (currentVehicleImage != null && (_vehicleImage == null || forceAssistantPhoto)) {
       await _setVehicleImage(currentVehicleImage);
     } else {
       final launchImagePath = garageLaunch?.vehicleImagePath;
@@ -2078,7 +2206,8 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
     final state = AppStateScope.of(context);
     if (state.pendingWrap == null &&
         state.pendingGarageWrapLaunch == null &&
-        state.currentVehicleImage == null) {
+        state.currentVehicleImage == null &&
+        !state.assistantPhotoPending) {
       return;
     }
 
@@ -2208,7 +2337,7 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
         _secondaryChipHex = _hexFromColor(color);
       }
       _expanded.add("color");
-      _expanded.add("application");
+      _expanded.add("advanced");
     });
   }
 

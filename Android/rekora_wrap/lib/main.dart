@@ -145,6 +145,7 @@ class _RekoraWrapAppState extends State<RekoraWrapApp> {
   @override
   void initState() {
     super.initState();
+    assistantTabRequest.addListener(_onAssistantTabRequest);
     _state = AppState.withSampleData();
     _tabBarGlassIntensity = ValueNotifier<double>(0.0);
     _state.syncLanguageWithSystemLocale(ui.PlatformDispatcher.instance.locale);
@@ -303,6 +304,13 @@ class _RekoraWrapAppState extends State<RekoraWrapApp> {
     );
   }
 
+  void _onAssistantTabRequest() {
+    final index = assistantTabRequest.value;
+    if (index == null) return;
+    assistantTabRequest.value = null;
+    _setTab(index);
+  }
+
   void _setTab(int index) {
     setState(() {
       _tabIndex = index;
@@ -311,6 +319,7 @@ class _RekoraWrapAppState extends State<RekoraWrapApp> {
 
   @override
   void dispose() {
+    assistantTabRequest.removeListener(_onAssistantTabRequest);
     _tabBarGlassIntensity.dispose();
     _state.dispose();
     super.dispose();

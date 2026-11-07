@@ -17,6 +17,7 @@ import 'config.dart';
 import 'datadog_support.dart';
 import 'models.dart';
 import 'services/billing_service.dart';
+import 'services/user_api.dart';
 
 class AppState extends ChangeNotifier {
   static const String _datadogLocalUserFileName = 'datadog_user_id.txt';
@@ -102,6 +103,8 @@ class AppState extends ChangeNotifier {
   WrapColor? pendingWrap;
   GarageWrapLaunchContext? pendingGarageWrapLaunch;
   File? currentVehicleImage;
+  // Set when the AI assistant hands over a photo: the visualizer must use it even if it already has a photo.
+  bool assistantPhotoPending = false;
   String? activeProjectId;
   User? firebaseUser;
   String language;
@@ -671,6 +674,8 @@ class AppState extends ChangeNotifier {
     final cachedUser = _auth.currentUser;
     if (cachedUser != null) {
       firebaseUser = cachedUser;
+      // Existing sessions do not go through sign-in, so register the profile here as well.
+      unawaited(UserApi.instance.registerProfile());
       await _syncDatadogUserInfo(cachedUser);
       _profileHydrated = false;
       await _ensureFirestoreNetworkReady();
@@ -785,6 +790,7 @@ class AppState extends ChangeNotifier {
       );
       final result = await _auth.signInWithCredential(credential);
       firebaseUser = result.user;
+      unawaited(UserApi.instance.registerProfile());
       await _syncDatadogUserInfo(result.user);
       if (_auth.currentUser != null) {
         _syncProfileFromUser(_auth.currentUser!);
@@ -822,6 +828,7 @@ class AppState extends ChangeNotifier {
       );
       final result = await _auth.signInWithCredential(oauth);
       firebaseUser = result.user;
+      unawaited(UserApi.instance.registerProfile());
       await _syncDatadogUserInfo(result.user);
       if (_auth.currentUser != null) {
         _syncProfileFromUser(_auth.currentUser!);
@@ -858,7 +865,13 @@ class AppState extends ChangeNotifier {
     final userRef = _firestore.collection('users').doc(uid);
 
     try {
-      // Remove user-scoped Firestore documents first.
+      // Remove the backend (RDS) copy first so no personal data is left behind.
+      final backendDeleted = await UserApi.instance.deleteAccount();
+      if (!backendDeleted) {
+        debugPrint('Backend user data delete failed; continuing with Firestore');
+      }
+
+      // Remove user-scoped Firestore documents.
       try {
         final projects = await userRef.collection('projects').get();
         for (final doc in projects.docs) {
@@ -922,23 +935,38 @@ class AppState extends ChangeNotifier {
         }
       }
 
-      final vehiclesSnap = await userRef.collection('vehicles').get();
-      final loadedVehicles = vehiclesSnap.docs
-          .map((doc) => SavedVehicle.fromMap(doc.data()))
-          .toList();
-      vehicles = loadedVehicles;
+      // Backend (RDS) is the read source. Firestore is used only when the backend is unreachable
+      // or has no data yet, so users whose mirror write failed still see their data.
+      final remoteVehicles = await UserApi.instance.list('vehicles');
+      final remoteProjects = await UserApi.instance.list('projects');
+      if (remoteVehicles != null &&
+          remoteProjects != null &&
+          (remoteVehicles.isNotEmpty || remoteProjects.isNotEmpty)) {
+        vehicles = remoteVehicles.map(SavedVehicle.fromMap).toList();
+        final loadedProjects = remoteProjects.map(VehicleProject.fromMap).toList();
+        for (final project in loadedProjects) {
+          _attachWrap(project);
+        }
+        projects = loadedProjects;
+      } else {
+        final vehiclesSnap = await userRef.collection('vehicles').get();
+        final loadedVehicles = vehiclesSnap.docs
+            .map((doc) => SavedVehicle.fromMap(doc.data()))
+            .toList();
+        vehicles = loadedVehicles;
 
-      final projectsSnap = await userRef
-          .collection('projects')
-          .orderBy('createdAt', descending: true)
-          .get();
-      final loadedProjects = projectsSnap.docs
-          .map((doc) => VehicleProject.fromMap(doc.data()))
-          .toList();
-      for (final project in loadedProjects) {
-        _attachWrap(project);
+        final projectsSnap = await userRef
+            .collection('projects')
+            .orderBy('createdAt', descending: true)
+            .get();
+        final loadedProjects = projectsSnap.docs
+            .map((doc) => VehicleProject.fromMap(doc.data()))
+            .toList();
+        for (final project in loadedProjects) {
+          _attachWrap(project);
+        }
+        projects = loadedProjects;
       }
-      projects = loadedProjects;
 
       if (activeProjectId != null &&
           projects.every((p) => p.id != activeProjectId)) {
@@ -971,8 +999,12 @@ class AppState extends ChangeNotifier {
     project.selectedWrapId = wrapId;
   }
 
+  // Firestore stays the read source during the transition. Every write is mirrored to the
+  // backend (RDS) so the backend copy is complete before reads are switched over.
+
   Future<void> _persistProject(VehicleProject project) async {
     if (firebaseUser == null) return;
+    unawaited(UserApi.instance.put('projects', project.id, project.toMap()));
     try {
       await _userDoc
           .collection('projects')
@@ -987,6 +1019,7 @@ class AppState extends ChangeNotifier {
 
   Future<void> _persistVehicle(SavedVehicle vehicle) async {
     if (firebaseUser == null) return;
+    unawaited(UserApi.instance.put('vehicles', vehicle.id, vehicle.toMap()));
     try {
       await _userDoc
           .collection('vehicles')
@@ -1001,6 +1034,7 @@ class AppState extends ChangeNotifier {
 
   Future<void> _deleteProject(String projectId) async {
     if (firebaseUser == null) return;
+    unawaited(UserApi.instance.delete('projects', projectId));
     try {
       await _userDoc.collection('projects').doc(projectId).delete();
     } on FirebaseException catch (e) {
@@ -1012,6 +1046,7 @@ class AppState extends ChangeNotifier {
 
   Future<void> _deleteVehicle(String vehicleId) async {
     if (firebaseUser == null) return;
+    unawaited(UserApi.instance.delete('vehicles', vehicleId));
     try {
       await _userDoc.collection('vehicles').doc(vehicleId).delete();
     } on FirebaseException catch (e) {
@@ -1156,3 +1191,6 @@ class AppStateScope extends InheritedNotifier<AppState> {
     return scope!.notifier!;
   }
 }
+
+/// Lets a child screen (the AI assistant) ask the main shell to switch tabs. Value = tab index, null = idle.
+final ValueNotifier<int?> assistantTabRequest = ValueNotifier<int?>(null);
