@@ -1,6 +1,10 @@
-import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'dart:convert';
 
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+
+import '../config.dart';
+import '../services/announcement_feed.dart';
 import '../theme.dart';
 import '../l10n.dart';
 
@@ -13,15 +17,28 @@ class AnnouncementsScreen extends StatefulWidget {
 
 class _AnnouncementsScreenState extends State<AnnouncementsScreen> {
   final Set<String> _read = {};
-  late final Future<List<QueryDocumentSnapshot<Map<String, dynamic>>>> _announcementsFuture =
-      _loadAnnouncements();
 
-  Future<List<QueryDocumentSnapshot<Map<String, dynamic>>>> _loadAnnouncements() async {
-    final snapshot = await FirebaseFirestore.instance
-        .collection('announcements')
-        .orderBy('createdAt', descending: true)
-        .get();
-    return snapshot.docs;
+  @override
+  void initState() {
+    super.initState();
+    // Notices opened earlier on this device stay read.
+    AnnouncementFeed.readIds().then((ids) {
+      if (mounted) setState(() => _read.addAll(ids));
+    });
+  }
+  late final Future<List<Map<String, dynamic>>> _announcementsFuture = _loadAnnouncements();
+
+  // Published notices from the Rekora backend (managed at /admin/announcements).
+  Future<List<Map<String, dynamic>>> _loadAnnouncements() async {
+    final res = await http
+        .get(Uri.parse('${Config.wrapBackendBaseUrl}/announcements'))
+        .timeout(const Duration(seconds: 15));
+    if (res.statusCode != 200) {
+      throw StateError('announcements ${res.statusCode}');
+    }
+    final body = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+    final items = (body['items'] as List?) ?? const [];
+    return [for (final item in items) Map<String, dynamic>.from(item as Map)];
   }
 
   @override
@@ -33,7 +50,7 @@ class _AnnouncementsScreenState extends State<AnnouncementsScreen> {
       appBar: AppBar(
         title: Text(l10n.tx('공지사항', 'Announcements')),
       ),
-      body: FutureBuilder<List<QueryDocumentSnapshot<Map<String, dynamic>>>>(
+      body: FutureBuilder<List<Map<String, dynamic>>>(
         future: _announcementsFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
@@ -47,7 +64,7 @@ class _AnnouncementsScreenState extends State<AnnouncementsScreen> {
               ),
             );
           }
-          final docs = snapshot.data ?? const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+          final docs = snapshot.data ?? const <Map<String, dynamic>>[];
           if (docs.isEmpty) {
             return Center(
               child: Text(
@@ -62,8 +79,8 @@ class _AnnouncementsScreenState extends State<AnnouncementsScreen> {
             itemCount: docs.length,
             separatorBuilder: (context, index) => const SizedBox(height: 10),
             itemBuilder: (context, index) {
-              final data = Map<String, dynamic>.from(docs[index].data());
-              final id = docs[index].id;
+              final data = docs[index];
+              final id = data['id']?.toString() ?? '';
               final item = _Announcement.fromMap(id, data);
               final isUnread = item.isNew && !_read.contains(id);
               return _AnnouncementTile(
@@ -72,6 +89,7 @@ class _AnnouncementsScreenState extends State<AnnouncementsScreen> {
                 isUnread: isUnread,
                 onTap: () {
                   setState(() => _read.add(id));
+                  AnnouncementFeed.markRead([id]);
                   _showDetail(outerContext, item, isKo);
                 },
               );
@@ -259,15 +277,7 @@ class _Announcement {
       return '';
     }
 
-    final ts = data['createdAt'];
-    String date = '';
-    if (ts is Timestamp) {
-      final dt = ts.toDate();
-      date =
-          '${dt.year}.${dt.month.toString().padLeft(2, '0')}.${dt.day.toString().padLeft(2, '0')}';
-    } else if (data['date'] != null) {
-      date = data['date'].toString();
-    }
+    final String date = data['date']?.toString() ?? '';
     return _Announcement(
       id: id,
       titleKo: strValue('titleKo'),

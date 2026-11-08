@@ -5,9 +5,11 @@ import '../l10n.dart';
 import '../models.dart';
 import '../theme.dart';
 import 'notifications_screen.dart';
+import '../services/announcement_feed.dart';
 import 'garage_add_vehicle_screen.dart';
 import 'project_detail_screen.dart';
 import 'lars_ai_color_recommendation_chat.dart';
+import 'design_screen.dart';
 
 String _localizedRecommendationLabel(String value, String languageCode) {
   if (languageCode != 'en') return value;
@@ -48,7 +50,7 @@ String _localizedRecommendationLabel(String value, String languageCode) {
 }
 
 String _homeHeroAdAsset(BuildContext context) {
-  return 'assets/branding/home_ai_wrap.png';
+  return 'assets/branding/home_hero_sports_car.png';
 }
 
 class HomeScreen extends StatelessWidget {
@@ -85,6 +87,9 @@ class HomeScreen extends StatelessWidget {
                   // Hero Banner
                   RepaintBoundary(child: _buildHeroBanner(context, latest)),
                   const SizedBox(height: 32),
+
+                  RepaintBoundary(child: _buildAIAssistantBanner(context, l10n, state)),
+                  const SizedBox(height: 24),
 
                   RepaintBoundary(
                     child: Row(
@@ -149,9 +154,6 @@ class HomeScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 16),
                   RepaintBoundary(child: _buildRecommendationScroll(context, state)),
-                  const SizedBox(height: 32),
-
-                  RepaintBoundary(child: _buildAIAssistantBanner(context, l10n, state)),
                   const SizedBox(height: 100),
                 ],
               ),
@@ -175,12 +177,7 @@ class HomeScreen extends StatelessWidget {
             'REKORA',
             style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900, letterSpacing: -1.8, color: Theme.of(context).colorScheme.onSurface),
           ),
-          IconButton(
-            icon: Icon(Icons.notifications_none_rounded, color: WrapTheme.primary, size: 32),
-            onPressed: () {
-              Navigator.of(context).push(MaterialPageRoute(builder: (_) => const NotificationsScreen()));
-            },
-          ),
+          const _NotificationBell(),
         ],
       ),
     );
@@ -305,70 +302,8 @@ class HomeScreen extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(
-                    child: ClipRRect(
-                      borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          if (wrap.referenceAssetPath != null)
-                            Image.asset(
-                              wrap.referenceAssetPath!,
-                              fit: BoxFit.cover,
-                              cacheWidth: 640,
-                              filterQuality: FilterQuality.medium,
-                              errorBuilder: (context, error, stackTrace) => _buildFallbackFilmTexture(wrap),
-                            )
-                          else
-                            _buildFallbackFilmTexture(wrap),
-                          DecoratedBox(
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                begin: Alignment.topCenter,
-                                end: Alignment.bottomCenter,
-                                colors: [
-                                  Colors.black.withValues(alpha: 0.08),
-                                  Colors.transparent,
-                                  Colors.black.withValues(alpha: 0.22),
-                                ],
-                              ),
-                            ),
-                          ),
-                          Positioned(
-                            left: 16,
-                            right: 16,
-                            bottom: 14,
-                            child: Row(
-                              children: [
-                                Container(
-                                  width: 18,
-                                  height: 18,
-                                  decoration: BoxDecoration(
-                                    color: wrap.swatch,
-                                    shape: BoxShape.circle,
-                                    border: Border.all(color: Colors.white, width: 1.5),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    '${wrap.brand} · ${wrap.finish}',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
+                  // Fixed height so every card's chip is the same size, whatever the text below it.
+                  SizedBox(height: 108, child: WrapChipPreview(wrap: wrap)),
                   Padding(
                     padding: const EdgeInsets.all(20),
                     child: Column(
@@ -1825,4 +1760,64 @@ class _PreferenceOption {
 
   final String id;
   final String label;
+}
+
+/// Header bell with a red count of new notices the user has not opened yet.
+class _NotificationBell extends StatefulWidget {
+  const _NotificationBell();
+
+  @override
+  State<_NotificationBell> createState() => _NotificationBellState();
+}
+
+class _NotificationBellState extends State<_NotificationBell> {
+  int _unread = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+  }
+
+  Future<void> _refresh() async {
+    final count = await AnnouncementFeed.unreadCount();
+    if (mounted) setState(() => _unread = count);
+  }
+
+  Future<void> _open() async {
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const NotificationsScreen()));
+    _refresh();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      onPressed: _open,
+      icon: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Icon(Icons.notifications_none_rounded, color: WrapTheme.primary, size: 32),
+          if (_unread > 0)
+            Positioned(
+              right: -4,
+              top: -4,
+              child: Container(
+                constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE11D48),
+                  borderRadius: BorderRadius.circular(9),
+                  border: Border.all(color: Colors.white, width: 1.5),
+                ),
+                child: Text(
+                  _unread > 9 ? '9+' : '$_unread',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 }

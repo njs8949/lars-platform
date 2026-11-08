@@ -16,6 +16,39 @@ class DesignScreen extends StatefulWidget {
 class _DesignScreenState extends State<DesignScreen> {
   final _searchController = TextEditingController();
   String _selectedFinishFilter = 'All';
+  // Colour chips turn like the pages of a book: one chip per page.
+  final _pageController = PageController(viewportFraction: 0.74);
+  int _pageIndex = 0;
+  // false = book view (page turning), true = grid view.
+  bool _gridView = false;
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  /// One library card. Shared by the book view and the grid view.
+  Widget _buildWrapCard(BuildContext context, int i, List<WrapColor> wraps, AppState state) {
+    return _WrapCard(
+      wrap: wraps[i],
+      onSelect: () {
+        state.setPendingWrap(wraps[i]);
+        widget.onWrapApplied?.call();
+      },
+      onViewDetails: () {
+        _showProductDetails(
+          context,
+          wraps[i],
+          onApply: () {
+            state.setPendingWrap(wraps[i]);
+            Navigator.of(context).pop();
+            widget.onWrapApplied?.call();
+          },
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -127,6 +160,11 @@ class _DesignScreenState extends State<DesignScreen> {
                           color: Theme.of(context).colorScheme.onSurface,
                         ),
                       ),
+                      IconButton(
+                        tooltip: _gridView ? l10n.tx('책자 보기', 'Book view') : l10n.tx('그리드 보기', 'Grid view'),
+                        onPressed: () => setState(() => _gridView = !_gridView),
+                        icon: Icon(_gridView ? Icons.auto_stories_outlined : Icons.grid_view_rounded),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 16),
@@ -136,7 +174,7 @@ class _DesignScreenState extends State<DesignScreen> {
                       padding: const EdgeInsets.symmetric(vertical: 40),
                       child: Center(child: Text(l10n.noResults)),
                     )
-                  else
+                  else if (_gridView)
                     GridView.builder(
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
@@ -147,24 +185,15 @@ class _DesignScreenState extends State<DesignScreen> {
                         childAspectRatio: 0.85,
                       ),
                       itemCount: filteredWraps.length,
-                      itemBuilder: (ctx, i) => _WrapCard(
-                        wrap: filteredWraps[i],
-                        onSelect: () {
-                          state.setPendingWrap(filteredWraps[i]);
-                          widget.onWrapApplied?.call();
-                        },
-                        onViewDetails: () {
-                          _showProductDetails(
-                            context,
-                            filteredWraps[i],
-                            onApply: () {
-                              state.setPendingWrap(filteredWraps[i]);
-                              Navigator.of(context).pop();
-                              widget.onWrapApplied?.call();
-                            },
-                          );
-                        },
-                      ),
+                      itemBuilder: (ctx, i) => _buildWrapCard(ctx, i, filteredWraps, state),
+                    )
+                  else
+                    _BookFlipView(
+                      controller: _pageController,
+                      pageIndex: _pageIndex,
+                      itemCount: filteredWraps.length,
+                      onPageChanged: (i) => setState(() => _pageIndex = i),
+                      itemBuilder: (ctx, i) => _buildWrapCard(ctx, i, filteredWraps, state),
                     ),
 
                   const SizedBox(height: 40),
@@ -381,7 +410,13 @@ class _DesignScreenState extends State<DesignScreen> {
       child: FilterChip(
         label: Text(label),
         selected: active,
-        onSelected: (_) => setState(() => _selectedFinishFilter = label),
+        onSelected: (_) {
+          setState(() {
+            _selectedFinishFilter = label;
+            _pageIndex = 0;
+          });
+          if (_pageController.hasClients) _pageController.jumpToPage(0);
+        },
         backgroundColor: WrapTheme.card(context),
         selectedColor: const Color(0xFF4F378A),
         checkmarkColor: Colors.white,
@@ -583,6 +618,153 @@ String _normalizeSearchToken(String input) {
   return input.toLowerCase().replaceAll(RegExp(r'[\s\-_()]'), '');
 }
 
+/// The colour chip preview used by the design hub cards. Shared so the home recommendations match it exactly.
+class WrapChipPreview extends StatelessWidget {
+  const WrapChipPreview({super.key, required this.wrap});
+
+  final WrapColor wrap;
+
+  @override
+  Widget build(BuildContext context) {
+    final previewImage = wrap.referenceAssetPath;
+    return Container(
+            margin: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              color: wrap.swatch.withValues(alpha: 0.18),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                if (previewImage != null)
+                  Image.asset(
+                    previewImage,
+                    fit: BoxFit.cover,
+                    cacheWidth: 560,
+                    filterQuality: FilterQuality.medium,
+                    errorBuilder: (context, error, stackTrace) => _WrapTexturePreview(wrap: wrap),
+                  )
+                else
+                  _WrapTexturePreview(wrap: wrap),
+                Positioned(
+                  left: 10,
+                  top: 10,
+                  child: Container(
+                    width: 22,
+                    height: 22,
+                    decoration: BoxDecoration(
+                      color: wrap.swatch,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 1.2),
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Colors.black26,
+                          blurRadius: 6,
+                          offset: Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: 10,
+                  right: 10,
+                  bottom: 10,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.44),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      wrap.finish,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+  }
+}
+
+/// Pages through items like a book: the page turns on its edge as it leaves the centre.
+class _BookFlipView extends StatelessWidget {
+  const _BookFlipView({
+    required this.controller,
+    required this.pageIndex,
+    required this.itemCount,
+    required this.onPageChanged,
+    required this.itemBuilder,
+  });
+
+  final PageController controller;
+  final int pageIndex;
+  final int itemCount;
+  final ValueChanged<int> onPageChanged;
+  final Widget Function(BuildContext, int) itemBuilder;
+
+  static const double _viewportFraction = 0.74;
+  static const double _cardAspect = 0.85; // width / height, as in the grid it replaces
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final pageWidth = constraints.maxWidth * _viewportFraction;
+        final pageHeight = pageWidth / _cardAspect;
+        return Column(
+          children: [
+            SizedBox(
+              height: pageHeight,
+              child: PageView.builder(
+                controller: controller,
+                itemCount: itemCount,
+                onPageChanged: onPageChanged,
+                itemBuilder: (ctx, i) => AnimatedBuilder(
+                  animation: controller,
+                  builder: (context, _) {
+                    final double page = controller.hasClients && controller.position.haveDimensions
+                        ? (controller.page ?? pageIndex.toDouble())
+                        : pageIndex.toDouble();
+                    final double d = (page - i).clamp(-1.0, 1.0).toDouble();
+                    final transform = Matrix4.identity()
+                      ..setEntry(3, 2, 0.0012)
+                      ..rotateY(-d * 0.55);
+                    return Transform(
+                      alignment: d >= 0 ? Alignment.centerLeft : Alignment.centerRight,
+                      transform: transform,
+                      child: Center(
+                        child: SizedBox(
+                          width: pageWidth - 16,
+                          height: pageHeight - 16,
+                          child: itemBuilder(ctx, i),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              itemCount == 0 ? '' : '${pageIndex + 1} / $itemCount',
+              style: TextStyle(color: WrapTheme.mutedText(context), fontSize: 12, fontWeight: FontWeight.w700),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
 class _WrapCard extends StatelessWidget {
   final WrapColor wrap;
   final VoidCallback onSelect;
@@ -595,7 +777,6 @@ class _WrapCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final previewImage = wrap.referenceAssetPath;
     return GestureDetector(
       onTap: onSelect,
       child: Container(
@@ -607,73 +788,7 @@ class _WrapCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(
-              child: Container(
-                margin: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(20),
-                  color: wrap.swatch.withValues(alpha: 0.18),
-                ),
-                clipBehavior: Clip.antiAlias,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    if (previewImage != null)
-                      Image.asset(
-                        previewImage,
-                        fit: BoxFit.cover,
-                        cacheWidth: 560,
-                        filterQuality: FilterQuality.medium,
-                        errorBuilder: (context, error, stackTrace) => _WrapTexturePreview(wrap: wrap),
-                      )
-                    else
-                      _WrapTexturePreview(wrap: wrap),
-                    Positioned(
-                      left: 10,
-                      top: 10,
-                      child: Container(
-                        width: 22,
-                        height: 22,
-                        decoration: BoxDecoration(
-                          color: wrap.swatch,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 1.2),
-                          boxShadow: const [
-                            BoxShadow(
-                              color: Colors.black26,
-                              blurRadius: 6,
-                              offset: Offset(0, 2),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    Positioned(
-                      left: 10,
-                      right: 10,
-                      bottom: 10,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.44),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Text(
-                          wrap.finish,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+            Expanded(child: WrapChipPreview(wrap: wrap)),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
               child: Column(
