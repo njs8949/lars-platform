@@ -70,6 +70,7 @@ const String _privacyPolicyText = '''
 회사는 회원가입, 원활한 고객상담, 각종 서비스의 제공을 위해 아래와 같은 최소한의 개인정보를 필수항목으로 수집하고 있습니다.
 
 - 수집항목: 이름, 이메일 주소, 사용자 ID(Firebase UID 등), 차량/컬러칩 사진 및 프로젝트명·메모 등 사용자 콘텐츠, 프로필 이미지, 앱 성능/충돌 로그(필요 시)
+- 앱 사용 기록 및 진단 정보(Datadog): 화면 이동·버튼 조작 등 사용 이벤트, 기기·OS 정보, 앱 성능 지표, 오류 로그, 세션 리플레이(화면 녹화)
 - 수집방법: 회원가입 및 프로필 수정, 이미지 업로드/촬영, 서비스 이용 과정에서 이용자가 직접 입력, 충돌 리포팅 도구를 통한 수집
 
 ## 2. 개인정보의 수집 및 이용목적
@@ -78,7 +79,7 @@ const String _privacyPolicyText = '''
 
 - 서비스 제공 및 품질 개선: 랩핑 추천/적용, 프로젝트 관리, 고객 지원
 - 회원 관리: 본인확인, 계정 관리, 비인가 사용 방지, 계정 삭제 처리
-- 앱 안정성: 성능/충돌 분석(사용 시)
+- 앱 안정성: 성능/충돌 분석, Datadog를 통한 오류 원인 파악 및 서비스 품질 개선
 
 ## 3. 개인정보의 보유 및 이용기간
 
@@ -102,6 +103,15 @@ const String _privacyPolicyText = '''
 ## 6. 개인정보 자동 수집 장치의 설치·운영 및 그 거부에 관한 사항
 
 현재 앱은 광고/크로스 앱 추적을 하지 않으며, 웹 쿠키 기반 추적을 사용하지 않습니다.
+
+앱은 서비스 안정성 모니터링을 위해 Datadog 모니터링 SDK를 사용합니다. Datadog에 전송되는 내용은 다음과 같습니다.
+
+- 제공받는 자 / 처리 위탁자: Datadog, Inc.
+- 이전 항목: 사용자 ID(Firebase UID, 또는 로그인하지 않은 경우 기기별 임의 ID), 이름·이메일(로그인한 경우), 인증 제공자, 익명 여부, 앱 사용 이벤트, 기기·OS 정보, 성능 지표, 오류·충돌 로그, 세션 리플레이(텍스트와 입력값은 가리고, 이미지는 가리지 않고 기록)
+- 이전 방법: 앱 사용 중 네트워크를 통한 실시간 전송
+- 이전 국가: 미국(Datadog 미국 서비스 지역 us1)
+- 이용 목적: 앱 안정성 모니터링, 오류 원인 분석, 서비스 품질 개선
+- 보유 기간: [보관 기간 확인 후 기재]
 
 ## 7. 개인정보에 관한 민원서비스
 
@@ -178,6 +188,7 @@ LARS Inc. ("the Company") complies with applicable privacy laws and regulations 
 We collect the minimum information necessary to provide our services, including:
 
 - Name, email address, and user ID such as Firebase UID
+- App usage and diagnostic data (Datadog): screen navigation and taps, device and OS information, performance metrics, error logs, and session replay (screen recordings)
 - Vehicle and color-chip photos, project titles, notes, and other user-generated content
 - Profile image
 - App performance or crash logs when needed
@@ -190,7 +201,7 @@ Collected information is used for:
 
 - Service delivery and quality improvement, including wrap recommendations, applications, project management, and support
 - User management such as identity verification, account administration, abuse prevention, and account deletion handling
-- App stability monitoring such as performance and crash analysis
+- App stability monitoring such as performance and crash analysis, identifying the causes of errors through Datadog, and improving service quality
 
 ## 3. Retention Period
 
@@ -214,6 +225,15 @@ Users may view, edit, or request deletion of their personal information at any t
 ## 6. Automatic Collection Devices
 
 The app does not use advertising-based cross-app tracking or cookie-based web tracking.
+
+The app uses the Datadog monitoring SDK to monitor service stability. The following information is sent to Datadog:
+
+- Recipient / processor: Datadog, Inc.
+- Items transferred: user ID (Firebase UID, or a random per-device ID when not signed in), name and email (when signed in), sign-in provider, anonymous status, app usage events, device and OS information, performance metrics, error and crash logs, and session replay (text and input values are masked; images are not masked)
+- Transfer method: real-time transmission over the network while the app is in use
+- Country of transfer: United States (Datadog US1 site)
+- Purpose: monitoring app stability, analysing causes of errors, and improving service quality
+- Retention period: [to be confirmed before publishing]
 
 ## 7. Privacy Contact
 

@@ -165,7 +165,7 @@ class ProfileScreen extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                         'Rekora Wrap v6.0.2',
+                         'Rekora Wrap v7.0',
                          style: TextStyle(
                            fontWeight: FontWeight.w800,
                            fontSize: 14,
