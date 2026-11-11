@@ -1,0 +1,22 @@
+# Flutter / Android build outputs (never commit these)
+.dart_tool/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+*.jks
+*.keystore
+*.iml
+.gradle/
+android/.gradle/
+android/local.properties
+android/key.properties
+ios/Pods/
+.idea/
+.vscode/
+.DS_Store
+android/app/google-services.json

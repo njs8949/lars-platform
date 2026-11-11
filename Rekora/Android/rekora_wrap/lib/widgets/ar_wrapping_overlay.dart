@@ -1,0 +1,880 @@
+import 'dart:async';
+import 'dart:io';
+import 'dart:math' as math;
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+import 'package:flutter/material.dart';
+import 'package:camera/camera.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:image/image.dart' as img_lib;
+import 'package:model_viewer_plus/model_viewer_plus.dart';
+import '../models.dart';
+import '../app_state.dart';
+import '../config.dart';
+import '../services/OpenAI_image_edit_service.dart';
+import '../services/vehicle_segmentation_service.dart';
+import '../services/native_live_wrap.dart';
+import '../services/full_vehicle_wrap_service.dart';
+import '../l10n.dart';
+import '../theme.dart';
+
+class ArWrappingOverlay extends StatefulWidget {
+  const ArWrappingOverlay({
+    super.key,
+    required this.onExit,
+    this.selectedWrap,
+    required this.finish,
+    required this.onWrapChanged,
+  });
+
+  final VoidCallback onExit;
+  final WrapColor? selectedWrap;
+  final String finish;
+  final Function(WrapColor?, String) onWrapChanged;
+
+  @override
+  State<ArWrappingOverlay> createState() => _ArWrappingOverlayState();
+}
+
+enum ArMode { liveAI, virtual3D }
+
+class _ArWrappingOverlayState extends State<ArWrappingOverlay> {
+  ArMode _mode = ArMode.liveAI;
+  CameraController? _cameraController;
+  bool _isCameraReady = false;
+  // Native live camera (Config.nativeLiveWrap): Flutter Texture id and aspect ratio.
+  int? _nativeTextureId;
+  // Display rotation of the phone in quarter turns (0..3). The native texture is always portrait.
+  int _nativeQuarterTurns = 0;
+
+  // Wrap Application Settings
+  _WrapApplicationMode _wrapMode = _WrapApplicationMode.fullBody;
+  Set<String> _selectedScopes = {'full'};
+  bool _wrapWheels = false; // New: Wheel wrapping option
+  bool _showingSettings = false;
+  
+  // Force Gemini model for high-fidelity wrapping
+  final _geminiService = OpenAIImageEditService(
+    proxyBaseUrl: Config.imageProxyUrl,
+    model: Config.geminiImageModel,
+    apiKey: Config.imageApiKey,
+  );
+  
+  ui.Image? _geminiResult;
+  bool _isGenerating = false;
+
+  // Live AI: on-device vehicle segmentation drives the color overlay
+  final VehicleSegmentationService _segmentation = VehicleSegmentationService();
+  // Processed live frame (vehicle tinted on-device), shown like the iOS live view.
+  ui.Image? _liveFrameImage;
+  // Server-side vehicle mask + chip, the same inputs the upload apply flow sends.
+  final FullVehicleWrapService _fullWrapService = FullVehicleWrapService();
+
+  // Overlay-local selection. The route's widget props are fixed at push time,
+  // so the overlay tracks its own color/finish choice.
+  WrapColor? _liveWrap;
+  String _liveFinish = 'Satin';
+  String _currentStatus = "";
+  
+  @override
+  void initState() {
+    super.initState();
+    _liveWrap = widget.selectedWrap;
+    _liveFinish = widget.finish;
+    _initCamera();
+  }
+
+  @override
+  void dispose() {
+    _segmentation.close();
+    _liveFrameImage?.dispose();
+    _liveFrameImage = null;
+    _cameraController?.dispose();
+    if (Config.nativeLiveWrap) NativeLiveWrap.stop();
+    super.dispose();
+  }
+
+  Future<void> _initCamera() async {
+    if (Config.nativeLiveWrap) {
+      await _startNativeCamera();
+      return;
+    }
+    final cameras = await availableCameras();
+    if (cameras.isEmpty) return;
+
+    _cameraController = CameraController(
+      cameras.first,
+      ResolutionPreset.high,
+      enableAudio: false,
+    );
+
+    try {
+      await _cameraController!.initialize();
+      if (!mounted) return;
+      setState(() {
+        _isCameraReady = true;
+        _currentStatus = "카메라 준비됨";
+      });
+      await _startLiveSegmentation();
+    } catch (e) {
+      debugPrint("Camera init error: $e");
+    }
+  }
+
+  Future<void> _startNativeCamera() async {
+    if (_nativeTextureId != null) return;
+    try {
+      NativeLiveWrap.setOrientationListener((degrees) {
+        // Direction is reversed relative to the device rotation, so the quarter turns are mirrored (4 - n).
+        if (mounted) setState(() => _nativeQuarterTurns = (4 - degrees ~/ 90) % 4);
+      });
+      final r = await NativeLiveWrap.start();
+      if (!mounted) {
+        await NativeLiveWrap.stop();
+        return;
+      }
+      setState(() {
+        _nativeTextureId = r.textureId;
+        _isCameraReady = true;
+        _currentStatus = "카메라 준비됨";
+      });
+    } catch (e) {
+      debugPrint("Native camera start error: $e");
+      if (mounted) setState(() => _currentStatus = "카메라를 시작하지 못했습니다");
+    }
+  }
+
+  Future<void> _safeExit() async {
+    setState(() => _isGenerating = true);
+    if (Config.nativeLiveWrap) {
+      await NativeLiveWrap.stop();
+      _nativeTextureId = null;
+    }
+    try {
+      if (_cameraController != null) {
+        if (_cameraController!.value.isStreamingImages) {
+          await _cameraController!.stopImageStream();
+        }
+        await _cameraController!.dispose();
+        _cameraController = null;
+      }
+    } catch (e) {
+      debugPrint("Error during camera disposal: $e");
+    }
+    if (mounted) widget.onExit();
+  }
+
+  Future<void> _switchMode(ArMode newMode) async {
+    if (_mode == newMode) return;
+    setState(() {
+      _mode = newMode;
+      _geminiResult = null;
+    });
+    if (!_isCameraReady) await _initCamera();
+
+    if (newMode == ArMode.liveAI) {
+      await _startLiveSegmentation();
+    } else {
+      await _stopLiveSegmentation();
+      if (mounted) {
+        setState(() {
+          _liveFrameImage?.dispose();
+          _liveFrameImage = null;
+        });
+      }
+    }
+  }
+
+  // ── Live AI: on-device vehicle segmentation (never calls Gemini) ───────────
+  Future<void> _startLiveSegmentation() async {
+    if (Config.nativeLiveWrap) {
+      await _startNativeCamera();
+      return;
+    }
+    final controller = _cameraController;
+    if (!mounted || _mode != ArMode.liveAI || controller == null) return;
+    if (!controller.value.isInitialized || controller.value.isStreamingImages) return;
+    try {
+      final sensorOrientation = controller.description.sensorOrientation;
+      await controller.startImageStream((image) => _onLiveFrame(image, sensorOrientation));
+    } catch (e) {
+      debugPrint("Live segmentation start error: $e");
+    }
+  }
+
+  Future<void> _stopLiveSegmentation() async {
+    if (Config.nativeLiveWrap) {
+      await NativeLiveWrap.stop();
+      _nativeTextureId = null;
+      return;
+    }
+    final controller = _cameraController;
+    if (controller == null || !controller.value.isStreamingImages) return;
+    try {
+      await controller.stopImageStream();
+    } catch (e) {
+      debugPrint("Live segmentation stop error: $e");
+    }
+  }
+
+  void _onLiveFrame(CameraImage image, int sensorOrientation) {
+    if (!mounted || _mode != ArMode.liveAI) return;
+    _segmentation.processFrame(image, sensorOrientation, tint: _liveWrap?.swatch).then((frame) async {
+      if (frame == null || !mounted || _mode != ArMode.liveAI) return;
+      final processed = await _decodeRgba(frame.rgba, frame.width, frame.height);
+      if (!mounted || _mode != ArMode.liveAI) {
+        processed.dispose();
+        return;
+      }
+      setState(() {
+        _liveFrameImage?.dispose();
+        _liveFrameImage = processed;
+      });
+    });
+  }
+
+  Future<ui.Image> _decodeRgba(Uint8List rgba, int width, int height) {
+    final completer = Completer<ui.Image>();
+    ui.decodeImageFromPixels(rgba, width, height, ui.PixelFormat.rgba8888, completer.complete);
+    return completer.future;
+  }
+
+  Future<void> _onColorSelected(WrapColor wrap, String finish) async {
+    widget.onWrapChanged(wrap, finish);
+    if (Config.nativeLiveWrap) NativeLiveWrap.setTint(wrap.swatch);
+    setState(() {
+      _liveWrap = wrap;
+      _liveFinish = finish;
+      _geminiResult = null;
+    });
+    // Live AI generates through the same Rekora wrap API as the upload apply flow
+    // (original frame + vehicle mask, composited over the masked area).
+    if (_mode == ArMode.liveAI) {
+      await _captureAndGeminiPolish(wrap, finish);
+    }
+  }
+
+  // ── 2D engine parity (iOS AIWrappingViewModel): upload keeps aspect ratio, sends a
+  // vehicle mask, and composites the generated result only over the masked area.
+  static const int _uploadLongSide = 1280;
+
+  img_lib.Image _fitLongSide(img_lib.Image src, int maxSide) {
+    final longSide = math.max(src.width, src.height);
+    if (longSide <= maxSide) return src;
+    final scale = maxSide / longSide;
+    return img_lib.copyResize(
+      src,
+      width: (src.width * scale).round(),
+      height: (src.height * scale).round(),
+      interpolation: img_lib.Interpolation.average,
+    );
+  }
+
+  /// Binary mask (white = vehicle) at [width] x [height], nearest-sampled from the live mask.
+  Uint8List _maskToPng(VehicleMask mask, int width, int height) {
+    final out = img_lib.Image(width: width, height: height, numChannels: 3);
+    for (var y = 0; y < height; y++) {
+      final my = math.min(mask.height - 1, (y * mask.height / height).floor());
+      for (var x = 0; x < width; x++) {
+        final mx = math.min(mask.width - 1, (x * mask.width / width).floor());
+        final on = mask.confidence[my * mask.width + mx] >= 0.5 ? 255 : 0;
+        out.setPixelRgb(x, y, on, on, on);
+      }
+    }
+    return Uint8List.fromList(img_lib.encodePng(out));
+  }
+
+  /// Server mask (PNG) -> confidence values on the upload frame grid.
+  VehicleMask _maskFromPng(Uint8List png, int width, int height) {
+    final confidence = Float32List(width * height);
+    final decoded = img_lib.decodeImage(png);
+    if (decoded != null) {
+      for (var y = 0; y < height; y++) {
+        final sy = math.min(decoded.height - 1, (y * decoded.height / height).floor());
+        for (var x = 0; x < width; x++) {
+          final sx = math.min(decoded.width - 1, (x * decoded.width / width).floor());
+          final p = decoded.getPixel(sx, sy);
+          confidence[y * width + x] = (p.r.toDouble() + p.g.toDouble() + p.b.toDouble()) / (3 * 255);
+        }
+      }
+    }
+    return VehicleMask(width: width, height: height, confidence: confidence);
+  }
+
+  /// One-color chip image, like the upload flow's synthetic chip.
+  Uint8List _solidChipJpeg(Color color) {
+    final chip = img_lib.Image(width: 64, height: 64, numChannels: 3);
+    final r = (color.r * 255).round();
+    final g = (color.g * 255).round();
+    final b = (color.b * 255).round();
+    for (var y = 0; y < 64; y++) {
+      for (var x = 0; x < 64; x++) {
+        chip.setPixelRgb(x, y, r, g, b);
+      }
+    }
+    return Uint8List.fromList(img_lib.encodeJpg(chip, quality: 95));
+  }
+
+  /// Keeps the original everywhere except the masked vehicle area, which takes the generated pixels.
+  Uint8List _compositeOverOriginal(img_lib.Image original, img_lib.Image generated, VehicleMask mask) {
+    final gen = (generated.width == original.width && generated.height == original.height)
+        ? generated
+        : img_lib.copyResize(
+            generated,
+            width: original.width,
+            height: original.height,
+            interpolation: img_lib.Interpolation.linear,
+          );
+    final out = img_lib.Image.from(original);
+    for (var y = 0; y < original.height; y++) {
+      final my = math.min(mask.height - 1, (y * mask.height / original.height).floor());
+      for (var x = 0; x < original.width; x++) {
+        final mx = math.min(mask.width - 1, (x * mask.width / original.width).floor());
+        final m = mask.confidence[my * mask.width + mx];
+        if (m <= 0) continue;
+        final o = original.getPixel(x, y);
+        final g = gen.getPixel(x, y);
+        out.setPixelRgb(
+          x,
+          y,
+          (o.r * (1 - m) + g.r * m).round(),
+          (o.g * (1 - m) + g.g * m).round(),
+          (o.b * (1 - m) + g.b * m).round(),
+        );
+      }
+    }
+    return Uint8List.fromList(img_lib.encodeJpg(out, quality: 95));
+  }
+
+  Future<void> _captureAndGeminiPolish([WrapColor? targetWrap, String? targetFinish]) async {
+    final wrap = targetWrap ?? _liveWrap;
+    final finish = targetFinish ?? _liveFinish;
+    
+    final cameraReady = Config.nativeLiveWrap
+        ? _nativeTextureId != null
+        : (_cameraController != null && _cameraController!.value.isInitialized);
+    if (!cameraReady || _isGenerating) return;
+    if (wrap == null) return;
+
+    setState(() {
+      _isGenerating = true;
+      _currentStatus = "레코라 이미지 엔진이 고해상도 랩핑을 적용 중입니다...";
+    });
+
+    // Flutter camera path: pause the frame stream while taking the still. Native path keeps the camera running,
+    // because stopping it would unbind the capture use case (the screen then stays black with a spinner).
+    if (!Config.nativeLiveWrap) await _stopLiveSegmentation();
+
+    try {
+      final Uint8List rawBytes = Config.nativeLiveWrap
+          ? await NativeLiveWrap.takePicture()
+          : await (await _cameraController!.takePicture()).readAsBytes();
+      
+      img_lib.Image? decoded = img_lib.decodeImage(rawBytes);
+      if (decoded == null) throw StateError("Captured photo could not be decoded");
+      if (decoded.width > decoded.height) {
+        decoded = img_lib.copyRotate(decoded, angle: 90);
+      }
+      final image = _fitLongSide(decoded, _uploadLongSide);
+      
+      final processedBytes = Uint8List.fromList(img_lib.encodeJpg(image, quality: 92));
+
+      final panels = _selectedScopes.join(", ");
+      final wheelInstruction = _wrapWheels ? "Include the wheels and rims in the wrap color." : "MANDATORY: DO NOT wrap the wheels, rims, tires, glass, or lights. Keep them original.";
+      String prompt = "";
+      switch (_wrapMode) {
+        case _WrapApplicationMode.fullBody:
+          prompt = "Identify the vehicle. Apply a $finish ${wrap.name} wrap to ALL painted body panels. HEX: ${wrap.hexCode}. $wheelInstruction";
+          break;
+        case _WrapApplicationMode.twoTone:
+          prompt = "Apply a $finish ${wrap.name} (HEX: ${wrap.hexCode}) wrap ONLY to these specific panels: $panels. Keep rest original. $wheelInstruction";
+          break;
+        case _WrapApplicationMode.accentOnly:
+          prompt = "Apply a $finish ${wrap.name} (HEX: ${wrap.hexCode}) accent wrap to ONLY these parts: $panels. $wheelInstruction";
+          break;
+        case _WrapApplicationMode.preserveExistingAccent:
+          prompt = "Apply a $finish ${wrap.name} (HEX: ${wrap.hexCode}) wrap to body, but PRESERVE all existing decals/stripes. $wheelInstruction";
+          break;
+      }
+
+      // Direct OpenAI wrap (iOS parity): no mask is sent and no composite is done; the returned image is shown as-is.
+      final resultBytes = await _geminiService.applyWrapWithFullPrompt(
+        imageBytes: processedBytes,
+        maskBytes: Uint8List(0),
+        fullPrompt: "$prompt Preserve all natural reflections and highlights for photorealism. Output result ONLY.",
+        targetHex: wrap.hexCode,
+      );
+
+      final codec = await ui.instantiateImageCodec(resultBytes);
+      final frame = await codec.getNextFrame();
+      
+      if (mounted) {
+        setState(() {
+          _geminiResult = frame.image;
+          _isGenerating = false;
+          _currentStatus = "AI 랩핑 완료";
+        });
+      }
+    } catch (e) {
+      debugPrint("Gemini polish error: $e");
+      if (mounted) {
+        setState(() {
+          _isGenerating = false;
+          _currentStatus = "AI 랩핑 실패";
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("AI 랩핑 중 오류 발생: $e"), backgroundColor: Colors.redAccent),
+        );
+      }
+    }
+  }
+
+  void _syncScopesForMode(_WrapApplicationMode mode) {
+    setState(() {
+      switch (mode) {
+        case _WrapApplicationMode.fullBody:
+          _selectedScopes = {'full'};
+          break;
+        case _WrapApplicationMode.twoTone:
+        case _WrapApplicationMode.accentOnly:
+          _selectedScopes = {'roof', 'mirrors'};
+          break;
+        case _WrapApplicationMode.preserveExistingAccent:
+          _selectedScopes = {'full'};
+          break;
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = L10n.of(context);
+    final state = AppStateScope.of(context);
+    
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _safeExit();
+      },
+      child: Material(
+        color: Colors.black,
+        child: Stack(
+          children: [
+            // LAYER 1: Shared Camera Background
+            Positioned.fill(
+              child: _isCameraReady && Config.nativeLiveWrap && _nativeTextureId != null
+                ? ClipRect(
+                    child: FittedBox(
+                      fit: BoxFit.cover,
+                      child: SizedBox(
+                        // Portrait content (720x1280). Quarter turns swap the box, so the content is never stretched.
+                        width: _nativeQuarterTurns.isOdd ? 1280 : 720,
+                        height: _nativeQuarterTurns.isOdd ? 720 : 1280,
+                        child: RotatedBox(
+                          quarterTurns: _nativeQuarterTurns,
+                          child: Texture(textureId: _nativeTextureId!),
+                        ),
+                      ),
+                    ),
+                  )
+                : _isCameraReady && !Config.nativeLiveWrap
+                ? ClipRect(
+                    child: OverflowBox(
+                      alignment: Alignment.center,
+                      child: FittedBox(
+                        fit: BoxFit.cover,
+                        child: SizedBox(
+                          width: 1,
+                          height: _cameraController!.value.aspectRatio,
+                          child: CameraPreview(_cameraController!),
+                        ),
+                      ),
+                    ),
+                  )
+                : const Center(child: CircularProgressIndicator(color: Colors.white)),
+            ),
+
+            // LAYER 2: Processed live frame with the vehicle tinted on-device (iOS-equivalent).
+            if (_mode == ArMode.liveAI && _liveFrameImage != null && _geminiResult == null)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: RawImage(image: _liveFrameImage, fit: BoxFit.cover),
+                ),
+              ),
+
+            // LAYER 3: Virtual 3D Model
+            if (_mode == ArMode.virtual3D)
+              Positioned.fill(
+                child: _buildVirtual3DView(),
+              ),
+
+            // LAYER 4: Gemini AI Result
+            if (_geminiResult != null)
+              Positioned.fill(
+                child: GestureDetector(
+                  onTap: () {
+                    setState(() => _geminiResult = null);
+                    _startLiveSegmentation();
+                  },
+                  child: RawImage(image: _geminiResult, fit: BoxFit.cover),
+                ),
+              ),
+
+            // LAYER 5: UI Overlay
+            SafeArea(
+              child: Column(
+                children: [
+                  _buildHeader(context, l10n),
+                  const Spacer(),
+                  if (_showingSettings) _buildSettingsQuickBar(l10n),
+                  _buildModeToggle(l10n),
+                  _buildBottomControls(context, l10n, state),
+                ],
+              ),
+            ),
+            
+            // AI Loading Status
+            if (_isGenerating)
+              Positioned.fill(
+                child: Container(
+                  color: Colors.black54,
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const CircularProgressIndicator(color: Colors.purpleAccent, strokeWidth: 4),
+                        const SizedBox(height: 25),
+                        Text(l10n.tx("레코라 이미지 엔진이 정교하게 랩핑 중...", "Rekora image engine is wrapping with detail..."), 
+                             style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildVirtual3DView() {
+    final color = _liveWrap?.swatch ?? Colors.white;
+    final r = color.red / 255.0;
+    final g = color.green / 255.0;
+    final b = color.blue / 255.0;
+
+    double metallic = 0.5;
+    double roughness = 0.4;
+    if (_liveFinish.toLowerCase() == 'gloss') { metallic = 0.2; roughness = 0.05; }
+    if (_liveFinish.toLowerCase() == 'matte') { metallic = 0.0; roughness = 0.9; }
+    if (_liveFinish.toLowerCase() == 'satin') { metallic = 0.1; roughness = 0.4; }
+    if (_liveFinish.toLowerCase() == 'metallic') { metallic = 0.8; roughness = 0.2; }
+
+    return ModelViewer(
+      key: ValueKey("3d-final-v2-${_liveWrap?.id}-$_liveFinish-$_wrapWheels"),
+      src: 'https://modelviewer.dev/shared-assets/models/Astronaut.glb', 
+      alt: "Virtual Vehicle",
+      ar: true,
+      autoRotate: true,
+      cameraControls: true,
+      backgroundColor: Colors.transparent,
+      relatedJs: """
+        const mv = document.querySelector('model-viewer');
+        const applySelectiveColor = () => {
+          if (mv && mv.model && mv.model.materials) {
+            mv.model.materials.forEach(m => {
+              const name = m.name.toLowerCase();
+              const isWheel = name.includes('wheel') || name.includes('rim') || name.includes('tire');
+              const isExcluded = name.includes('glass') || name.includes('light') || name.includes('window') || name.includes('chrome');
+              
+              if ((isWheel && $_wrapWheels) || (!isWheel && !isExcluded)) {
+                m.pbrMetallicRoughness.setBaseColorFactor([$r, $g, $b, 1.0]);
+                m.pbrMetallicRoughness.setRoughnessFactor($roughness);
+                m.pbrMetallicRoughness.setMetallicFactor($metallic);
+              }
+            });
+          }
+        };
+        mv.addEventListener('load', applySelectiveColor);
+        setTimeout(applySelectiveColor, 300);
+      """,
+    );
+  }
+
+  Widget _buildHeader(BuildContext context, L10n l10n) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+      child: Row(
+        children: [
+          ElevatedButton.icon(
+            onPressed: _safeExit,
+            icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18),
+            label: Text(l10n.tx("나가기", "Exit"), style: const TextStyle(fontWeight: FontWeight.bold)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              shape: const StadiumBorder(),
+            ),
+          ),
+          const Spacer(),
+          IconButton(
+            onPressed: () => setState(() => _showingSettings = !_showingSettings),
+            icon: const Icon(Icons.tune_rounded, color: Colors.white, size: 28),
+            style: IconButton.styleFrom(backgroundColor: Colors.black45),
+          ),
+          const SizedBox(width: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: _isGenerating ? Colors.purple : (_mode == ArMode.liveAI ? Colors.green : Colors.blue),
+              borderRadius: BorderRadius.circular(20)
+            ),
+            child: Text(
+              _isGenerating ? l10n.tx("AI 분석 중", "AI Rendering") : (_mode == ArMode.liveAI ? l10n.tx("실시간 AI", "Live AI") : l10n.tx("가상 3D", "Virtual 3D")),
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSettingsQuickBar(L10n l10n) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 20),
+      margin: const EdgeInsets.only(bottom: 20),
+      decoration: BoxDecoration(color: Colors.black.withOpacity(0.7), borderRadius: BorderRadius.circular(20)),
+      child: Column(
+        children: [
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Row(
+              children: _WrapApplicationMode.values.map((m) {
+                final active = _wrapMode == m;
+                return GestureDetector(
+                  onTap: () {
+                    setState(() => _wrapMode = m);
+                    _syncScopesForMode(m);
+                  },
+                  child: Container(
+                    margin: const EdgeInsets.only(right: 10),
+                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                    decoration: BoxDecoration(color: active ? WrapTheme.primary : Colors.white10, borderRadius: BorderRadius.circular(25)),
+                    child: Text(_wrapModeLabel(l10n, m), style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+          if (_wrapMode == _WrapApplicationMode.twoTone || _wrapMode == _WrapApplicationMode.accentOnly) ...[
+            const SizedBox(height: 15),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Row(
+                children: _availableAccentPanels.map((p) {
+                  final selected = _selectedScopes.contains(p);
+                  return GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        if (selected) _selectedScopes.remove(p); else _selectedScopes.add(p);
+                        if (_selectedScopes.isEmpty) _selectedScopes.add('roof');
+                      });
+                    },
+                    child: Container(
+                      margin: const EdgeInsets.only(right: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      decoration: BoxDecoration(color: selected ? Colors.pinkAccent : Colors.white10, borderRadius: BorderRadius.circular(15)),
+                      child: Text(_panelLabel(l10n, p), style: const TextStyle(color: Colors.white, fontSize: 12)),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          ],
+          const SizedBox(height: 20),
+          // Wheel Wrap Toggle
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Row(
+              children: [
+                const Icon(Icons.circle_outlined, color: Colors.white, size: 20),
+                const SizedBox(width: 10),
+                Text(l10n.tx("휠 랩핑 포함", "Wrap Wheels"), style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+                const Spacer(),
+                Switch(
+                  value: _wrapWheels,
+                  onChanged: (v) => setState(() => _wrapWheels = v),
+                  activeColor: WrapTheme.primary,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _wrapModeLabel(L10n l10n, _WrapApplicationMode mode) {
+    switch (mode) {
+      case _WrapApplicationMode.fullBody: return l10n.tx('전체', 'Full');
+      case _WrapApplicationMode.twoTone: return l10n.tx('투톤', 'Two-Tone');
+      case _WrapApplicationMode.accentOnly: return l10n.tx('포인트', 'Accent');
+      case _WrapApplicationMode.preserveExistingAccent: return l10n.tx('기존유지', 'Preserve');
+    }
+  }
+
+  String _panelLabel(L10n l10n, String panel) {
+    switch (panel) {
+      case 'roof': return l10n.tx('루프', 'Roof');
+      case 'mirrors': return l10n.tx('미러', 'Mirrors');
+      case 'hood': return l10n.tx('후드', 'Hood');
+      case 'trunk': return l10n.tx('트렁크', 'Trunk');
+      case 'side_skirts': return l10n.tx('사이드스커트', 'Skirts');
+      case 'front_bumper': return l10n.tx('앞범퍼', 'F Bumper');
+      case 'rear_bumper': return l10n.tx('뒷범퍼', 'R Bumper');
+      default: return panel;
+    }
+  }
+
+  Widget _buildModeToggle(L10n l10n) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 25),
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(16)),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _modeBtn(ArMode.liveAI, l10n.tx("실시간 AI", "Live AI")),
+          _modeBtn(ArMode.virtual3D, l10n.tx("가상 3D", "Virtual 3D")),
+        ],
+      ),
+    );
+  }
+
+  Widget _modeBtn(ArMode mode, String label) {
+    final active = _mode == mode;
+    return GestureDetector(
+      onTap: () => _switchMode(mode),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
+        decoration: BoxDecoration(
+          color: active ? WrapTheme.primary : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Text(label, style: TextStyle(color: Colors.white, fontWeight: active ? FontWeight.bold : FontWeight.normal, fontSize: 14)),
+      ),
+    );
+  }
+
+  Widget _buildBottomControls(BuildContext context, L10n l10n, AppState state) {
+    final wraps = state.wraps.toList();
+
+    return Container(
+      padding: const EdgeInsets.only(bottom: 40, top: 20),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Colors.transparent, Colors.black.withOpacity(0.98)],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter
+        ),
+      ),
+      child: Column(
+        children: [
+          // Color Selector
+          SizedBox(
+            height: 95,
+            child: ListView.separated(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              scrollDirection: Axis.horizontal,
+              itemCount: wraps.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 15),
+              itemBuilder: (context, index) {
+                final w = wraps[index];
+                final selected = _liveWrap?.id == w.id;
+                return GestureDetector(
+                  onTap: () => _onColorSelected(w, _liveFinish),
+                  child: Column(
+                    children: [
+                      Container(
+                        width: 60, height: 60,
+                        decoration: BoxDecoration(
+                          color: w.swatch,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: selected ? Colors.white : Colors.white24, width: selected ? 3.5 : 1.5),
+                          boxShadow: [if (selected) BoxShadow(color: w.swatch.withOpacity(0.7), blurRadius: 18)]
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: 70,
+                        child: Text(w.name, style: const TextStyle(color: Colors.white, fontSize: 10), textAlign: TextAlign.center, maxLines: 1, overflow: TextOverflow.ellipsis),
+                      )
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 20),
+          // Finish Selector
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: ['Gloss', 'Matte', 'Satin', 'Metallic'].map((f) {
+              final active = _liveFinish == f;
+              return GestureDetector(
+                onTap: () {
+                  final current = _liveWrap;
+                  if (current != null) _onColorSelected(current, f);
+                },
+                child: Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 6),
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: active ? WrapTheme.primary : Colors.white.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(25),
+                  ),
+                  child: Text(f, style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: active ? FontWeight.bold : FontWeight.normal)),
+                ),
+              );
+            }).toList(),
+          ),
+          // The live AI mode applies the wrap as soon as a colour or finish is picked, so the apply button is hidden there.
+          if (_mode != ArMode.liveAI) ...[
+            const SizedBox(height: 30),
+            ElevatedButton(
+            onPressed: _liveWrap != null ? () => _captureAndGeminiPolish() : null,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.white, 
+              foregroundColor: Colors.black, 
+              padding: const EdgeInsets.symmetric(horizontal: 70, vertical: 22),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+              elevation: 15,
+            ),
+            child: Text(l10n.tx("AI 랩핑 적용", "Apply AI Wrap"), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 17)),
+          ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+enum _WrapApplicationMode {
+  fullBody,
+  twoTone,
+  accentOnly,
+  preserveExistingAccent,
+}
+
+const List<String> _availableAccentPanels = <String>[
+  'roof',
+  'mirrors',
+  'hood',
+  'trunk',
+  'side_skirts',
+  'front_bumper',
+  'rear_bumper',
+];
