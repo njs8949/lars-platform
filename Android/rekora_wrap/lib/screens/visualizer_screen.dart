@@ -9,6 +9,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import '../services/wrap_events.dart';
+import '../services/ai_consent.dart';
 import '../app_state.dart';
 import '../config.dart';
 import '../l10n.dart';
@@ -16,6 +17,9 @@ import '../models.dart';
 import '../services/ai_viewer_service.dart';
 import '../services/chip_calibration_service.dart';
 import '../services/color_chip_analyzer.dart';
+import '../services/color_correction_service.dart';
+import '../services/film_catalog_service.dart';
+import '../services/wrap_usage_service.dart';
 import '../services/full_vehicle_wrap_service.dart';
 import '../theme.dart';
 import 'calibration_camera_screen.dart';
@@ -44,6 +48,11 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
   List<double>? _tapPoint;
   final _fullWrapService = FullVehicleWrapService(backendBaseUrl: Config.backendBaseUrl);
   final _chipAnalyzer = ColorChipAnalyzer();
+  final _filmCatalog = FilmCatalogService();
+  final _colorCorrection = ColorCorrectionService();
+  final _wrapUsage = WrapUsageService();
+  // Films from the server catalogue closest to the scanned chip colour (empty when unavailable).
+  List<CatalogFilmCandidate> _catalogMatches = const [];
   final _aiViewerService = AiViewerService();
   final _chipCalibrationService = ChipCalibrationService();
   
@@ -67,9 +76,10 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
   // SAM 3 only produces the mask. Colour is applied by the OpenAI router; the deterministic recolour is optional.
   static const bool _useDeterministicRecolor = false;
   bool _generating = false;
+  // Set synchronously on tap so a second tap during the consent dialog or before setState is ignored.
+  bool _aiRequestInFlight = false;
   String _generatingStatus = '';
   AiPreviewResult? _preview;
-  bool _proAdvancedEngineEnabled = false;
   final Set<String> _expanded = {"color", "ai"};
   bool _captureGuideExpanded = true;
   bool _wrapPanelExpanded = true;
@@ -272,6 +282,11 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
             child: Column(
               children: [
                 _buildSideIcon(
+                  Icons.wb_sunny_outlined,
+                  onTap: () => _showEnvironmentSheet(context),
+                ),
+                const SizedBox(height: 12),
+                _buildSideIcon(
                   Icons.zoom_in_rounded,
                   onTap: () => _handleZoomAction(context, displayImage != null),
                 ),
@@ -294,7 +309,9 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
                                 _chipColor = wrap.swatch;
                                 _chipHex = _hexFromColor(wrap.swatch);
                               }
+                              // Keep the AI prompt's finish in step with the chip, not just the UI label.
                               _finish = finish;
+                              _finishPrompt = _resolveFinishPrompt(finish);
                             });
                           },
                         ),
@@ -303,13 +320,6 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
                   },
                 ),
               ],
-            ),
-          ),
-          Positioned(
-            right: 20, top: 20,
-            child: _buildSideIcon(
-              Icons.wb_sunny_outlined,
-              onTap: () => _showEnvironmentSheet(context),
             ),
           ),
         ],
@@ -795,118 +805,6 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
             height: 1.4,
           ),
         ),
-        if (_wrapMode == _WrapApplicationMode.twoTone ||
-            _wrapMode == _WrapApplicationMode.accentOnly) ...[
-          const SizedBox(height: 18),
-          Text(
-            l10n.tx('적용 영역', 'Target Panels'),
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w800,
-              color: Theme.of(context).colorScheme.onSurface,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: _availableAccentPanels.map((panel) {
-              final selected = _accentPanels.contains(panel);
-              return FilterChip(
-                label: Text(_panelLabel(l10n, panel)),
-                selected: selected,
-                onSelected: (value) {
-                  setState(() {
-                    if (value) {
-                      _accentPanels.add(panel);
-                    } else if (_accentPanels.length > 1) {
-                      _accentPanels.remove(panel);
-                    }
-                  });
-                },
-              );
-            }).toList(),
-          ),
-        ],
-        if (_wrapMode == _WrapApplicationMode.twoTone) ...[
-          const SizedBox(height: 18),
-          Text(
-            l10n.tx('보조 랩 필름', 'Secondary Wrap Film'),
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w800,
-              color: Theme.of(context).colorScheme.onSurface,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            children: ['Gloss', 'Matte', 'Satin', 'Metallic'].map((f) => ChoiceChip(
-              label: Text(f),
-              selected: _secondaryFinish == f,
-              onSelected: (_) => setState(() {
-                _secondaryFinish = f;
-                _secondaryFinishPrompt = f;
-              }),
-            )).toList(),
-          ),
-          const SizedBox(height: 10),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              _buildIconButton(
-                Icons.colorize_outlined,
-                l10n.tx('보조 Hex 입력', 'Secondary Hex'),
-                () => _showHexInputSheet(target: _HexInputTarget.secondary),
-              ),
-              _buildIconButton(
-                Icons.copy_rounded,
-                l10n.tx('주색 복사', 'Copy Primary'),
-                () {
-                  final primary = _chipColor ?? _selectedWrap?.swatch;
-                  if (primary == null) return;
-                  setState(() {
-                    _secondaryChipColor = primary;
-                    _secondaryChipHex = _hexFromColor(primary);
-                  });
-                },
-              ),
-            ],
-          ),
-          if (_secondaryChipColor != null) ...[
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: WrapTheme.background(context),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: WrapTheme.border(context)),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: _secondaryChipColor,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      '${_secondaryChipHex ?? ''} · $_secondaryFinish',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w800,
-                        color: Theme.of(context).colorScheme.onSurface,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ],
         if (_wrapMode == _WrapApplicationMode.preserveExistingAccent) ...[
           const SizedBox(height: 18),
           Container(
@@ -966,9 +864,75 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
                 Text(_chipHex ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
               ],
             ),
-          )
+          ),
+          if (_catalogMatches.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            _buildCatalogMatches(),
+          ],
         ]
       ],
+    );
+  }
+
+  Future<void> _loadCatalogMatches(String hex) async {
+    if (mounted) setState(() => _catalogMatches = const []);
+    final matches = await _filmCatalog.matchHex(hex);
+    // Ignore a stale response if the chip colour changed while the request was running.
+    if (!mounted || _chipHex != hex) return;
+    setState(() => _catalogMatches = matches);
+    // A very close catalogue film is a better target than the photo reading, which carries lighting error.
+    if (matches.isNotEmpty && matches.first.deltaE < _snapDeltaE && matches.first.swatch != null) {
+      final film = matches.first;
+      setState(() {
+        _chipColor = film.swatch;
+        _chipHex = film.hex;
+      });
+    }
+  }
+
+  static const double _snapDeltaE = 5.0;
+
+  Widget _buildCatalogMatches() {
+    final l10n = L10n.of(context);
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: WrapTheme.background(context), borderRadius: BorderRadius.circular(16)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            l10n.tx('비슷한 색상 필름', 'Similar films'),
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          for (final film in _catalogMatches)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                children: [
+                  Container(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(color: film.swatch ?? Colors.grey, shape: BoxShape.circle),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      '${film.brand} · ${film.colorName}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '${film.finishLabel} · ${film.modelCode}',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
     );
   }
 
@@ -1017,12 +981,6 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
           title: Text(l10n.includeChromeDelete, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
           value: _includeChromeDelete,
           onChanged: (v) => setState(() => _includeChromeDelete = v),
-          activeThumbColor: const Color(0xFF4F378A),
-        ),
-        SwitchListTile(
-          title: Text(l10n.tx('고급 프로 엔진', 'Advanced Pro Engine'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-          value: _proAdvancedEngineEnabled,
-          onChanged: (v) => setState(() => _proAdvancedEngineEnabled = v),
           activeThumbColor: const Color(0xFF4F378A),
         ),
       ],
@@ -1111,11 +1069,14 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
     return Column(
       children: [
         GestureDetector(
-          onTap: _generatePreview,
+          onTap: _generating ? null : _generatePreview,
           child: Container(
             width: double.infinity,
             height: 80,
-            decoration: BoxDecoration(color: const Color(0xFF4F378A), borderRadius: BorderRadius.circular(24)),
+            decoration: BoxDecoration(
+              color: _generating ? const Color(0xFF4F378A).withValues(alpha: 0.45) : const Color(0xFF4F378A),
+              borderRadius: BorderRadius.circular(24),
+            ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -1216,6 +1177,9 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
     });
 
     try {
+      // Server calibration is optional. When it is unavailable, the on-device analysis below supplies the colour.
+      var serverApplied = false;
+      try {
       // 2. Perform Server-side Calibration
       // ROIs match CalibrationCameraScreen guides
       final result = await _chipCalibrationService.calibrateChip(
@@ -1234,6 +1198,7 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
       if (calibrated != null && mounted) {
         final rgb = calibrated['rgb'] as Map<String, dynamic>?;
         if (rgb != null) {
+          serverApplied = true;
           final color = Color.fromARGB(255, rgb['r'] as int, rgb['g'] as int, rgb['b'] as int);
           setState(() {
             _chipColor = color;
@@ -1252,17 +1217,23 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
         }
       }
 
-      // Also run local analysis for palette if needed (optional)
+      } catch (e) {
+        debugPrint('[Visualizer] Server calibration unavailable, using on-device analysis: $e');
+      }
+
+      // On-device analysis: used whenever the server did not return a colour (same fallback as iOS).
       final analysis = await _chipAnalyzer.analyze(file);
       if (mounted) {
         setState(() {
-          if (_chipColor == null && analysis != null) {
+          if (!serverApplied && analysis != null) {
             _chipColor = analysis.primaryColor;
             _chipHex = analysis.hex;
           }
           _expanded.add("color");
         });
       }
+      final matchHex = _chipHex;
+      if (matchHex != null) _loadCatalogMatches(matchHex);
 
     } catch (e) {
       debugPrint('Calibration failed: $e');
@@ -1290,8 +1261,19 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
   }
 
   Future<void> _generatePreview() async {
+    if (_aiRequestInFlight || _generating) return;
+    _aiRequestInFlight = true;
+    try {
+      await _runGeneratePreview();
+    } finally {
+      _aiRequestInFlight = false;
+    }
+  }
+
+  Future<void> _runGeneratePreview() async {
     final messenger = ScaffoldMessenger.of(context);
     final l10n = L10n.of(context);
+    if (!await AiConsent.ensure(context, isKo: l10n.code != 'en')) return;
     final successMessage = l10n.tx('AI 랩핑이 적용되었습니다.', 'AI wrapping has been applied.');
     final failurePrefix = l10n.tx('AI 랩핑 실패: ', 'AI wrapping failed: ');
     if (_vehicleImage == null) {
@@ -1308,28 +1290,34 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
       return;
     }
     final state = AppStateScope.of(context);
-    if (state.profile.wrapQuota > 0 &&
-        state.profile.wrapUsed >= state.profile.wrapQuota) {
+    // Count this wrap on the server before generating. The server enforces the plan quota and cannot be reset
+    // by restarting or reinstalling the app. A failed generation is refunded below.
+    try {
+      final usage = await _wrapUsage.consume();
+      if (!mounted) return;
+      state.applyServerWrapUsage(usage.used, usage.quota);
+    } on WrapQuotaExceeded catch (e) {
+      if (!mounted) return;
+      final usage = e.usage;
+      if (usage != null) state.applyServerWrapUsage(usage.used, usage.quota);
       messenger.showSnackBar(
         SnackBar(content: Text(L10n.of(context).aiWrapQuotaExceededMsg)),
       );
       return;
-    }
-    if (_wrapMode == _WrapApplicationMode.twoTone &&
-        _secondaryChipColor == null) {
+    } catch (_) {
+      if (!mounted) return;
       messenger.showSnackBar(
         SnackBar(
-          content: Text(
-            L10n.of(context).tx(
-              '투톤 랩핑에는 보조 랩 필름 색상을 먼저 지정해 주세요.',
-              'Please choose the secondary wrap film color for two-tone wrapping first.',
-            ),
-          ),
+          content: Text(L10n.of(context).tx(
+            '사용 횟수를 확인하지 못했습니다. 네트워크 연결을 확인한 뒤 다시 시도해 주세요.',
+            'Could not confirm your usage. Check your connection and try again.',
+          )),
         ),
       );
       return;
     }
-    
+    var wrapCounted = true;
+
     setState(() {
       _generating = true;
       _generatingStatus = 'AI 랩핑 엔진 분석 중...';
@@ -1396,7 +1384,6 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
             );
             _generating = false;
           });
-          state.recordAiWrapUsed();
           _recordGarageWrapHistory(state);
           messenger.showSnackBar(SnackBar(content: Text(successMessage)));
           return;
@@ -1439,7 +1426,13 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
         final mergedBytes = Config.useBackendWrap
             ? aiBytes
             : await _mergePreviewWithOriginalBackground(aiBytes);
-        final resultFile = await _writePreviewTempFile(mergedBytes);
+        // Generated colours drift from the film colour; pull the painted area back onto it.
+        // On any failure the AI image is kept unchanged.
+        final mask = _maskBytes;
+        final corrected = mask == null
+            ? null
+            : await _colorCorrection.correct(imageBytes: mergedBytes, maskBytes: mask, hex: colorHex);
+        final resultFile = await _writePreviewTempFile(corrected ?? mergedBytes);
         if (!mounted) return;
         setState(() {
           _preview = AiPreviewResult(
@@ -1451,7 +1444,6 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
           );
           _generating = false;
         });
-        state.recordAiWrapUsed();
         _recordGarageWrapHistory(state);
         WrapEvents.log('wrap_completed', props: {
           'target_hex': _chipHex ?? _hexFromColor(_chipColor ?? Colors.grey),
@@ -1468,6 +1460,10 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
       throw StateError('OpenAI 라우터에서 결과를 받지 못했습니다. 다시 시도해 주세요.');
     } catch (e) {
       WrapEvents.log('wrap_failed', props: {'duration_ms': DateTime.now().difference(_wrapStartedAt ?? DateTime.now()).inMilliseconds, 'error': '$e'});
+      if (wrapCounted) {
+        final usage = await _wrapUsage.refund();
+        if (usage != null && mounted) state.applyServerWrapUsage(usage.used, usage.quota);
+      }
       setState(() => _generating = false);
       messenger.showSnackBar(
         SnackBar(
@@ -2375,39 +2371,16 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
   }
 
   Set<String> _selectedPartsForRequest() {
-    switch (_wrapMode) {
-      case _WrapApplicationMode.fullBody:
-      case _WrapApplicationMode.twoTone:
-      case _WrapApplicationMode.preserveExistingAccent:
-        return {'전체 랩핑'};
-      case _WrapApplicationMode.accentOnly:
-        return {..._accentPanels};
-    }
-  }
-
-  List<String>? _selectedScopesForFallback() {
-    if (_wrapMode == _WrapApplicationMode.accentOnly) {
-      return _accentPanels.toList();
-    }
-    return null;
+    return {'전체 랩핑'};
   }
 
   String _buildWrapModeInstruction() {
     final primaryHex = _chipHex ?? _selectedWrap?.hexCode ?? '#808080';
     final primaryName = _selectedWrap?.displayName ?? 'primary wrap film';
     final primaryFinish = _finishPrompt.isEmpty ? _finish : _finishPrompt;
-    final accentList = _accentPanels.map((p) => _panelPromptLabel(p)).join(', ');
     switch (_wrapMode) {
       case _WrapApplicationMode.fullBody:
         return 'Apply a full-body wrap using $primaryName in $primaryFinish finish with exact target color $primaryHex on all painted body panels.';
-      case _WrapApplicationMode.twoTone:
-        final secondaryHex = _secondaryChipHex ?? '#FFFFFF';
-        final secondaryFinish = _secondaryFinishPrompt.isEmpty ? _secondaryFinish : _secondaryFinishPrompt;
-        return 'Create a premium two-tone wrap. Use the primary film $primaryName in $primaryFinish finish with exact target color $primaryHex on the main body. '
-            'Use a secondary wrap film in $secondaryFinish finish with exact target color $secondaryHex only on these accent panels: $accentList. '
-            'The separation between primary and secondary areas must be clean, intentional, and OEM-like.';
-      case _WrapApplicationMode.accentOnly:
-        return 'Apply a point-wrap only. Keep the rest of the vehicle unchanged and apply the selected wrap film $primaryName in $primaryFinish finish with exact target color $primaryHex only on these panels: $accentList.';
       case _WrapApplicationMode.preserveExistingAccent:
         return 'Apply the new wrap film $primaryName in $primaryFinish finish with exact target color $primaryHex across the main painted body panels, '
             'but preserve all existing stripes, decals, racing graphics, and existing accent wrap sections exactly as they already appear.';
@@ -2418,10 +2391,6 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
     switch (mode) {
       case _WrapApplicationMode.fullBody:
         return l10n.tx('전체 랩핑', 'Full Wrap');
-      case _WrapApplicationMode.twoTone:
-        return l10n.tx('투톤 랩핑', 'Two-Tone');
-      case _WrapApplicationMode.accentOnly:
-        return l10n.tx('포인트 랩핑', 'Accent Wrap');
       case _WrapApplicationMode.preserveExistingAccent:
         return l10n.tx('기존 포인트 유지', 'Keep Existing Accents');
     }
@@ -2431,10 +2400,6 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
     switch (mode) {
       case _WrapApplicationMode.fullBody:
         return l10n.tx('차량의 모든 도장 패널에 하나의 랩 필름을 적용합니다.', 'Apply one wrap film to all painted body panels.');
-      case _WrapApplicationMode.twoTone:
-        return l10n.tx('메인 바디와 선택한 패널에 서로 다른 두 개의 랩 필름을 적용합니다.', 'Use one main wrap film and a second film on selected accent panels.');
-      case _WrapApplicationMode.accentOnly:
-        return l10n.tx('루프, 미러, 후드 같은 특정 부위에만 포인트 랩핑을 적용합니다.', 'Apply the wrap only to selected accent panels such as roof, mirrors, or hood.');
       case _WrapApplicationMode.preserveExistingAccent:
         return l10n.tx('기존 그래픽과 포인트 랩핑은 유지하고, 나머지 바디만 새로 랩핑합니다.', 'Keep existing accent graphics intact and wrap only the remaining body panels.');
     }
@@ -2515,8 +2480,6 @@ const List<String> _availableAccentPanels = <String>[
 
 enum _WrapApplicationMode {
   fullBody,
-  twoTone,
-  accentOnly,
   preserveExistingAccent,
 }
 

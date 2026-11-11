@@ -357,13 +357,15 @@ class _AppUsageGuideSheetState extends State<_AppUsageGuideSheet> {
         icon: Icons.auto_awesome_rounded,
         title: l10n.tx('AI 랩핑 적용', 'AI Wrap Application'),
         summary: l10n.tx(
-          'AI 랩핑 화면에서는 차량 사진 업로드, 컬러칩 선택, 랩핑 방식 선택, 저장까지 한 번에 진행합니다.',
-          'AI Wrapping lets you upload a vehicle photo, choose a color chip, tune the environment, choose a wrap strategy, and save the result.',
+          'AI 랩핑 화면에서 차량 사진을 올리고, 컬러칩 또는 디자인 허브의 필름 색을 적용한 뒤 결과를 저장합니다.',
+          'On the AI Wrapping screen, upload a vehicle photo, apply a film color from a color chip or Design Hub, and save the result.',
         ),
         steps: [
-          l10n.tx('차량 이미지를 업로드한 뒤 컬러칩 선택이나 디자인 허브에서 고른 필름을 사용할 수 있습니다.', 'Upload a vehicle image and use either a color chip selection or a film from Design Hub.'),
-          l10n.tx('`랩핑 방식`에서 전체 랩핑, 투톤, 포인트 랩핑, 기존 포인트 유지 중 하나를 선택할 수 있습니다.', 'Choose Full Wrap, Two-Tone, Accent Wrap, or Keep Existing Accents in the wrap strategy section.'),
-          l10n.tx('환경 설정에서는 날씨, 시간대, 배경 도시를 정하고, 결과 이미지는 갤러리에 저장할 수 있습니다.', 'You can set weather, time of day, and background city, then save the final image to the gallery.'),
+          l10n.tx('차량 사진을 업로드한 뒤 컬러칩을 스캔하거나 디자인 허브에서 필름을 고릅니다.', 'Upload a vehicle photo, then scan a color chip or pick a film from Design Hub.'),
+          l10n.tx('컬러칩을 스캔하면 "비슷한 색상 필름" 목록이 나타나며, 아주 가까운 필름이 있으면 그 필름 색으로 맞춰집니다.', 'After a chip scan, "Similar films" lists the closest films. If one is a very close match, its color is used.'),
+          l10n.tx('고급 설정에서 랩핑 방식(전체 랩핑, 기존 포인트 유지)과 크롬 딜리트 포함 여부를 정합니다.', 'In Advanced settings, choose the wrap method (Full Wrap or Keep Existing Accents) and whether to include chrome delete.'),
+          l10n.tx('적용하기를 누르면 결과 색은 선택한 필름 색에 맞춰 보정됩니다. 생성이 끝날 때마다 AI 생성 크레딧이 1회 차감됩니다.', 'Tap Apply AI Wrap. The result color is corrected to the selected film color. Each completed generation uses one AI generation credit.'),
+          l10n.tx('미리보기 왼쪽 하단에서 환경 설정(날씨, 시간대, 배경), 돋보기(세부 확대), 3D(AR 보기)를 사용할 수 있습니다.', 'Use the buttons at the bottom left of the preview: environment settings (weather, time, background), zoom for details, and 3D for AR view.'),
         ],
       ),
       _GuidePage(
@@ -387,7 +389,7 @@ class _AppUsageGuideSheetState extends State<_AppUsageGuideSheet> {
           'This is where you save results, reopen the guide, and reach support channels.',
         ),
         steps: [
-          l10n.tx('AI 랩핑 결과는 필름명과 워터마크가 포함된 상태로 갤러리에 저장됩니다.', 'AI wrap results are saved to the gallery with film name and watermark.'),
+          l10n.tx('AI 랩핑 결과는 필름명과 워터마크가 포함된 상태로 갤러리에 저장됩니다. 프로필의 AI 생성 크레딧에서 남은 횟수를 확인할 수 있습니다.', 'AI wrap results are saved to the gallery with film name and watermark. Check your remaining AI generation credits on your profile.'),
           l10n.tx('더보기 메뉴의 `사용자 매뉴얼`에서 이 설명을 언제든 다시 열 수 있습니다.', 'You can reopen this guide anytime from More > User Manual.'),
           l10n.tx('고객 지원 / FAQ에서는 카카오톡 1:1 채팅과 문의 메일을 바로 열 수 있습니다.', 'Help Center / FAQ lets you open KakaoTalk 1:1 chat or support email directly.'),
         ],

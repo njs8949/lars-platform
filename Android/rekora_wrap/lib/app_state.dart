@@ -207,34 +207,22 @@ class AppState extends ChangeNotifier {
     final project = _projectById(projectId);
     if (project == null) return false;
 
-    final needsCount = !project.wrapAppliedCounted;
-    if (needsCount && profile.wrapUsed >= profile.wrapQuota) {
-      return false;
-    }
-
+    // Choosing a colour for a project does not use an AI credit.
+    // Only a completed AI wrap uses one (see recordAiWrapUsed).
     project.selectedWrap = wrap;
     project.selectedWrapId = wrap.id;
     project.designExplored = true;
-    if (needsCount) {
-      profile = profile.copyWith(wrapUsed: profile.wrapUsed + 1);
-      project.wrapAppliedCounted = true;
-    }
     activeProjectId = project.id;
     notifyListeners();
     _persistProject(project);
-    _saveProfile();
     return true;
   }
 
-  /// AI 랩핑 1회 사용 기록. 쿼터 초과 시 false 반환.
-  bool recordAiWrapUsed() {
-    if (profile.wrapQuota > 0 && profile.wrapUsed >= profile.wrapQuota) {
-      return false;
-    }
-    profile = profile.copyWith(wrapUsed: profile.wrapUsed + 1);
+  /// Mirrors this month's AI wrap count from the server. The server is the source of truth (see WrapUsageService).
+  void applyServerWrapUsage(int used, int quota) {
+    profile = profile.copyWith(wrapUsed: used, wrapQuota: quota);
     notifyListeners();
     _saveProfile();
-    return true;
   }
 
   void updateUsageGuidePrefs({

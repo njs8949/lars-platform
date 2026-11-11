@@ -12,6 +12,7 @@ import 'dart:ui' as ui;
 
 import 'app_state.dart';
 import 'datadog_support.dart';
+import 'services/datadog_consent.dart';
 import 'l10n.dart';
 import 'screens/design_screen.dart';
 import 'screens/garage_screen.dart';
@@ -112,7 +113,8 @@ Future<void> main() async {
       ),
     );
 
-  await DatadogSdk.runApp(configuration, TrackingConsent.granted, () async {
+  // Starts in the pending state: nothing is sent until the user agrees (see services/datadog_consent.dart).
+  await DatadogSdk.runApp(configuration, TrackingConsent.pending, () async {
     initializeDatadogLogger();
     await _syncInitialDatadogUserInfo();
     logDatadogInfo(
@@ -151,9 +153,11 @@ class _RekoraWrapAppState extends State<RekoraWrapApp> {
     _state.syncLanguageWithSystemLocale(ui.PlatformDispatcher.instance.locale);
     _state.initAuthListener();
     DatadogSdk.instance.rum?.startView(runtimeType.toString());
+    DatadogConsent.applyStored();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _state.refreshRemoteCommunityFeed();
       _maybeShowAuAgeGate(context);
+      DatadogConsent.askIfNeeded(context, isKo: L10n.of(context).code != 'en');
     });
   }
 

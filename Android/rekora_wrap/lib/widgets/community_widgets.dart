@@ -1,4 +1,5 @@
 import 'dart:convert';
+import '../services/community_moderation.dart';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -126,6 +127,12 @@ class _CommunityComposerState extends State<CommunityComposer> {
     final state = AppStateScope.of(context);
     final t = L10n.of(context);
     final text = _controller.text.trim();
+    if (CommunityModeration.containsBlockedTerm(text)) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(t.tx('부적절한 표현이 포함되어 있습니다. 내용을 수정해 주세요.', 'The post contains words that are not allowed. Please edit it.')),
+      ));
+      return;
+    }
     if (text.isEmpty && _image == null) {
       ScaffoldMessenger.of(
         context,
@@ -199,6 +206,53 @@ class CommunityPostTile extends StatelessWidget {
   const CommunityPostTile({super.key, required this.post});
   final CommunityPost post;
 
+  Future<void> _onModerationAction(BuildContext context, String value) async {
+    final t = L10n.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    if (value == 'block') {
+      await CommunityModeration.block(post.author);
+      messenger.showSnackBar(SnackBar(
+        content: Text(t.tx('이 작성자의 글을 숨겼습니다.', 'Posts from this author are now hidden.')),
+      ));
+      return;
+    }
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: Text(t.tx('신고 사유', 'Report reason')),
+        children: [
+          for (final r in CommunityModeration.reasons)
+            SimpleDialogOption(
+              onPressed: () => Navigator.of(ctx).pop(r),
+              child: Text(_reasonLabel(t, r)),
+            ),
+        ],
+      ),
+    );
+    if (reason == null) return;
+    final ok = await CommunityModeration.report(postId: post.id, postAuthor: post.author, reason: reason);
+    messenger.showSnackBar(SnackBar(
+      content: Text(ok
+          ? t.tx('신고가 접수되었습니다. 검토 후 조치하겠습니다.', 'Report received. We will review it.')
+          : t.tx('신고를 접수하지 못했습니다. 로그인 후 다시 시도해 주세요.', 'Could not send the report. Sign in and try again.')),
+    ));
+  }
+
+  String _reasonLabel(L10n t, String reason) {
+    switch (reason) {
+      case 'abuse':
+        return t.tx('욕설·괴롭힘', 'Abuse or harassment');
+      case 'sexual':
+        return t.tx('음란물', 'Sexual content');
+      case 'spam':
+        return t.tx('스팸·광고', 'Spam or advertising');
+      case 'illegal':
+        return t.tx('불법 정보', 'Illegal content');
+      default:
+        return t.tx('기타', 'Other');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = AppStateScope.of(context);
@@ -251,6 +305,15 @@ class CommunityPostTile extends StatelessWidget {
                       ),
                     ],
                   ),
+                ),
+                PopupMenuButton<String>(
+                  tooltip: t.tx('신고 및 차단', 'Report or block'),
+                  icon: Icon(Icons.more_horiz, color: WrapTheme.mutedText(context), size: 20),
+                  onSelected: (value) => _onModerationAction(context, value),
+                  itemBuilder: (_) => [
+                    PopupMenuItem(value: 'report', child: Text(t.tx('이 글 신고', 'Report this post'))),
+                    PopupMenuItem(value: 'block', child: Text(t.tx('이 작성자 차단', 'Block this author'))),
+                  ],
                 ),
                 const SizedBox(width: 8),
                 Container(
@@ -500,5 +563,22 @@ class CommunityPostTile extends StatelessWidget {
           : '${diff.inHours}시간 전';
     }
     return t.code == 'en' ? '${diff.inDays} days ago' : '${diff.inDays}일 전';
+  }
+}
+
+/// A feed item that hides posts from authors this user has blocked.
+class CommunityFeedItem extends StatelessWidget {
+  const CommunityFeedItem({super.key, required this.post});
+  final CommunityPost post;
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<Set<String>>(
+      future: CommunityModeration.blockedAuthors(),
+      builder: (context, snapshot) {
+        if (snapshot.data?.contains(post.author) ?? false) return const SizedBox.shrink();
+        return CommunityPostTile(post: post);
+      },
+    );
   }
 }

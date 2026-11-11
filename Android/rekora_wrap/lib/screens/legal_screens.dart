@@ -111,7 +111,20 @@ const String _privacyPolicyText = '''
 - 이전 방법: 앱 사용 중 네트워크를 통한 실시간 전송
 - 이전 국가: 미국(Datadog 미국 서비스 지역 us1)
 - 이용 목적: 앱 안정성 모니터링, 오류 원인 분석, 서비스 품질 개선
-- 보유 기간: [보관 기간 확인 후 기재]
+- 보유 기간: 진단 로그는 최대 365일 보관 후 자동 삭제, 세션 기록 및 화면 녹화는 30일 보관 후 자동 삭제
+
+## 8. 외부 AI 서비스 이용 및 제3자 제공
+
+- 이용자가 올린 차량 사진과 AI 요청 내용은 AI 랩핑과 색상 추천을 위해 다음 외부 서비스로 전송됩니다: OpenAI(이미지 생성), Anthropic(Claude, 추천 대화), Google(Gemini, 이미지 처리), Amazon Web Services(차량 영역 인식 및 서버 처리).
+- 전송은 이용자가 AI 기능을 처음 사용할 때 동의한 경우에만 이루어집니다. 동의는 앱 설정에서 철회할 수 있습니다.
+- 각 외부 서비스는 자체 개인정보 처리방침에 따라 정보를 처리합니다.
+
+## 8-1. 커뮤니티 콘텐츠 정책 및 신고·차단
+
+- 커뮤니티 글은 이용자가 작성합니다. 욕설과 괴롭힘, 음란물, 스팸·광고, 불법 정보는 금지됩니다.
+- 다른 이용자의 글은 글의 메뉴(⋯)에서 신고하거나 작성자를 차단할 수 있습니다. 차단한 작성자의 글은 내 화면에서 숨겨집니다.
+- 신고된 글은 운영팀이 검토하여 삭제 등 필요한 조치를 신속히 취합니다.
+- 문의: lars@lars-technologies.com
 
 ## 7. 개인정보에 관한 민원서비스
 
@@ -120,7 +133,7 @@ const String _privacyPolicyText = '''
 - 개인정보관리책임자: 남종수
 - 이메일: lars@lars-technologies.com
 
-이용자는 회사의 서비스를 이용하시며 발생하는 모든 개인정보보호 관련 민원을 개인정보관리책임자 혹은 담당 부서로 신고하실 수 있습니다. 앱 내 프로필 > 계정 > 계정 삭제 기능을 통해 직접 계정을 삭제할 수 있습니다.
+이용자는 회사의 서비스를 이용하시며 발생하는 모든 개인정보보호 관련 민원을 개인정보관리책임자 혹은 담당 부서로 신고하실 수 있습니다. 앱 내 프로필 > 계정 > 계정 삭제 기능을 통해 직접 계정을 삭제할 수 있습니다. 앱을 설치하지 않은 경우 https://wrap-api.lars-technologies.com/account-deletion 에서 계정과 데이터 삭제를 요청할 수 있습니다.
 
 ## 8. 고지의 의무
 
@@ -233,14 +246,27 @@ The app uses the Datadog monitoring SDK to monitor service stability. The follow
 - Transfer method: real-time transmission over the network while the app is in use
 - Country of transfer: United States (Datadog US1 site)
 - Purpose: monitoring app stability, analysing causes of errors, and improving service quality
-- Retention period: [to be confirmed before publishing]
+- Retention period: diagnostic logs are kept up to 365 days, then deleted automatically; session records and screen recordings are kept for 30 days, then deleted automatically
+
+## 8. External AI Services and Third-Party Sharing
+
+- Vehicle photos and AI requests you submit are sent to these external services for AI wrapping and colour recommendations: OpenAI (image generation), Anthropic (Claude, recommendation chat), Google (Gemini, image processing), and Amazon Web Services (vehicle region detection and server processing).
+- Data is sent only after you agree the first time you use an AI feature. You can withdraw consent in the app settings.
+- Each external service processes data under its own privacy policy.
+
+## 7-1. Community Content Policy, Reporting and Blocking
+
+- Community posts are written by users. Abuse and harassment, sexual content, spam or advertising, and illegal content are not allowed.
+- You can report another user's post or block its author from the post menu (⋯). Posts from blocked authors are hidden from your screen.
+- Reported posts are reviewed by our team, and necessary action, including removal, is taken promptly.
+- Contact: lars@lars-technologies.com
 
 ## 7. Privacy Contact
 
 - Privacy officer: Nam Jong-su
 - Email: lars@lars-technologies.com
 
-Users may report privacy-related issues through the contact above. Accounts can also be deleted directly from Profile > Account > Delete Account.
+Users may report privacy-related issues through the contact above. Accounts can also be deleted directly from Profile > Account > Delete Account. Without the app, you can request account and data deletion at https://wrap-api.lars-technologies.com/account-deletion.
 
 ## 8. Notice of Changes
 

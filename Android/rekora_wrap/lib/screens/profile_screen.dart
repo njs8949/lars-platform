@@ -6,7 +6,10 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../app_state.dart';
+import '../services/app_update_service.dart';
 import '../l10n.dart';
+import '../services/datadog_consent.dart';
+import '../services/ai_consent.dart';
 import '../models.dart';
 import '../theme.dart';
 import 'app_usage_guide_screen.dart';
@@ -146,6 +149,27 @@ class ProfileScreen extends StatelessWidget {
                   ),
                   _buildMenuTile(
                     context,
+                    iconData: Icons.shield_outlined,
+                    title: l10n.tx('데이터 수집 동의 변경', 'Change data collection consent'),
+                    subtitle: l10n.tx('앱 안정성 진단 데이터 수집을 켜거나 끕니다', 'Turn app stability diagnostics on or off'),
+                    onTap: () => DatadogConsent.change(context, isKo: l10n.code != 'en'),
+                  ),
+                  _buildMenuTile(
+                    context,
+                    iconData: Icons.photo_camera_back_outlined,
+                    title: l10n.tx('AI 사진 전송 동의 철회', 'Withdraw AI photo consent'),
+                    subtitle: l10n.tx('다음 AI 기능 사용 시 다시 동의를 묻습니다', 'You will be asked again before the next AI feature'),
+                    onTap: () async {
+                      await AiConsent.revoke();
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                          content: Text(l10n.tx('AI 사진 전송 동의를 철회했습니다.', 'AI photo consent withdrawn.')),
+                        ));
+                      }
+                    },
+                  ),
+                  _buildMenuTile(
+                    context,
                     iconData: Icons.delete_forever_rounded,
                     title: l10n.tx('계정 삭제', 'Delete Account'),
                     subtitle: l10n.tx('계정과 저장된 데이터를 삭제합니다', 'Delete your account and saved data'),
@@ -164,14 +188,22 @@ class ProfileScreen extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                         'Rekora Wrap v7.0',
-                         style: TextStyle(
-                           fontWeight: FontWeight.w800,
-                           fontSize: 14,
-                           color: Theme.of(context).colorScheme.onSurface,
-                         ),
-                        ),                        const SizedBox(height: 4),
+                        InkWell(
+                          borderRadius: BorderRadius.circular(8),
+                          onTap: () => showAppUpdateCheck(context, isKorean: l10n.code != 'en'),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 2),
+                            child: Text(
+                              'Rekora Wrap v$kAppVersionName',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 14,
+                                color: Theme.of(context).colorScheme.onSurface,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
                         Text(
                           '© 2026 LARS Inc. All rights reserved.',
                           style: TextStyle(
