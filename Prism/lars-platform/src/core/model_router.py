@@ -249,17 +249,14 @@ def run_engine(engine: Engine, message: str, history: Optional[List[dict]] = Non
         from src.core.llm_provider import is_production
         if not is_production() and not claude_api_key():
             raise RuntimeError(f"{engine.name} 모델을 쓸 수 없고, Claude 키도 없습니다.")
+        # 사용량(토큰)은 LLMClient가 실제 응답 값으로 이미 기록한다. 여기서 또 적으면 호출이 두 번 집계된다.
         reply = _call_claude(engine, messages)
         backend = "bedrock" if is_production() else "claude-fallback"
-        # 토큰 수는 이 경로에서 알 수 없으므로 호출 횟수만 남긴다 (known=False).
-        usage_ledger.record(backend, engine.name, "routed", 0, 0, False)
         return {"reply": reply, "engine": engine.name, "backend": backend, "model": ""}
 
     if engine.backend == "exaone":
-        reply = _call_exaone(messages)
-        usage_ledger.record("exaone", exaone_config()["model"], "routed", 0, 0, False)
+        reply = _call_exaone(messages)  # 사용량은 _call_exaone 안에서 응답 값으로 기록된다
         return {"reply": reply, "engine": engine.name, "backend": "exaone-api", "model": exaone_config()["model"]}
 
-    reply = _call_claude(engine, messages)
-    usage_ledger.record("claude", engine.name, "routed", 0, 0, False)
+    reply = _call_claude(engine, messages)  # 사용량은 LLMClient가 응답 값으로 기록한다
     return {"reply": reply, "engine": engine.name, "backend": "claude", "model": ""}

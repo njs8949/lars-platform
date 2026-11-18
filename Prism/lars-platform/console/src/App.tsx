@@ -347,7 +347,7 @@ function Models({ data }: { data: Overview }) {
                   {b.requests === 0 && <div className="sub">이번 달 호출 기록 없음</div>}
                   <div className="kv"><span>요청</span><span>{int(b.requests)}</span></div>
                   <div className="kv"><span>입력 / 출력 토큰</span><span>{tok(b.input_tokens)} / {tok(b.output_tokens)}</span></div>
-                  <div className="kv"><span>추정 비용</span><span>{data.month.prices_configured && b.unpriced_requests < b.requests ? usd(b.estimated_cost) : '가격 미설정'}</span></div>
+                  <div className="kv"><span>추정 비용</span><span>{data.month.prices_configured && (b.requests === 0 || b.unpriced_requests < b.requests) ? usd(b.estimated_cost) : '가격 미설정'}</span></div>
                 </div>
               </section>
             );
@@ -444,7 +444,7 @@ function Usage({ data, range, setRange }: { data: Overview; range: Range; setRan
         <td className="num">{int(b.requests)}</td>
         <td className="num">{tok(b.input_tokens)}</td>
         <td className="num">{tok(b.output_tokens)}</td>
-        <td className="num">{b.unpriced_requests === b.requests ? '가격 미설정' : usd(b.estimated_cost)}</td>
+        <td className="num">{b.requests > 0 && b.unpriced_requests === b.requests ? '가격 미설정' : usd(b.estimated_cost)}</td>
       </tr>
     ));
   const hasLimit = data.limits.monthly_tokens || data.limits.weekly_tokens || data.limits.session_tokens;
