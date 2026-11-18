@@ -24,7 +24,7 @@ const DecisionInterface: React.FC<{ language?: 'ko' | 'en' }> = ({ language = 'e
 
   const fetchPendingDecisions = async () => {
     try {
-      const response = await fetch('/api/orchestration/decisions/pending');
+      const response = await fetch('http://localhost:8001/api/orchestration/decisions/pending');
       const data = await response.json();
       setDecisions(data.decisions || []);
       setLoading(false);
@@ -36,7 +36,7 @@ const DecisionInterface: React.FC<{ language?: 'ko' | 'en' }> = ({ language = 'e
   const handleDecision = async (decisionId: string, choice: string) => {
     setSubmitting(decisionId);
     try {
-      const response = await fetch(`/api/orchestration/decisions/${decisionId}/submit`, {
+      const response = await fetch(`http://localhost:8001/api/orchestration/decisions/${decisionId}/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ choice }),

@@ -1,0 +1,35 @@
+{
+  "test_name": "LARS Prism 이미지 생성 기능 테스트",
+  "timestamp": "2026-09-04T19:59:25.572066",
+  "categories": {
+    "UI/UX Design": 4,
+    "Data Visualization": 4,
+    "Icons & Illustrations": 6,
+    "3D Models & Animation": 4,
+    "Diagrams": 5,
+    "Marketing Materials": 5
+  },
+  "total_images": 28,
+  "supported_features": [
+    "UI/UX Design Generation",
+    "Data Visualization",
+    "Icon Creation",
+    "3D Model Generation",
+    "Animation Creation",
+    "Diagram Generation",
+    "Marketing Content",
+    "High-Resolution Output"
+  ],
+  "rekora_capabilities": [
+    "image_generation",
+    "visual_creation",
+    "3d_design",
+    "animation_creation",
+    "diagram_generation",
+    "icon_creation",
+    "ui_design",
+    "infographic_design"
+  ],
+  "status": "✅ All tests passed",
+  "success_rate": "100%"
+}

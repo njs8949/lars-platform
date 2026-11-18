@@ -745,6 +745,7 @@ async fn apply_patch(response_text: String) -> Result<Vec<String>, String> {
     let output = Command::new("sh")
         .current_dir("..")
         .arg(script_path)
+        .arg("code")
         .arg("patch")
         .arg(&response_text)
         .env("LARS_AUTO_CREATE", "true") 
@@ -1361,46 +1362,96 @@ print(json.dumps(result))
     }
 }
 
+fn sysctl_value(key: &str) -> Option<String> {
+    std::process::Command::new("/usr/sbin/sysctl")
+        .args(["-n", key])
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+fn ane_spec(chip: &str) -> (i32, f64) {
+    let (cores, tops) = if chip.contains("M4") {
+        (16, 38.0)
+    } else if chip.contains("M3") {
+        (16, 18.0)
+    } else if chip.contains("M2") {
+        (16, 15.8)
+    } else if chip.contains("M1") {
+        (16, 11.0)
+    } else {
+        return (0, 0.0);
+    };
+    let dies = if chip.contains("Ultra") { 2 } else { 1 };
+    (cores * dies, tops * dies as f64)
+}
+
+fn probe_ml_backends() -> (bool, bool, bool) {
+    let script = "import importlib.util as u; print(int(u.find_spec('mlx') is not None), int(u.find_spec('coremltools') is not None), int(u.find_spec('torch') is not None))";
+    let out = std::process::Command::new("/bin/zsh")
+        .args(["-lc", &format!("python3 -c \"{}\"", script)])
+        .output();
+    match out {
+        Ok(out) if out.status.success() => {
+            let text = String::from_utf8_lossy(&out.stdout);
+            let flags: Vec<bool> = text.split_whitespace().map(|v| v == "1").collect();
+            (
+                flags.first().copied().unwrap_or(false),
+                flags.get(1).copied().unwrap_or(false),
+                flags.get(2).copied().unwrap_or(false),
+            )
+        }
+        _ => (false, false, false),
+    }
+}
+
 #[tauri::command]
 async fn get_npu_info() -> Result<NPUInfo, String> {
-    use std::process::Command;
-    let python_code = r#"
-import json
-import sys
-sys.path.insert(0, '.')
-from src.core.npu_detector import npu_info
-data = {
-    'chip_name': npu_info.chip_name,
-    'ane_cores': npu_info.ane_cores,
-    'ane_tops': npu_info.ane_tops,
-    'cpu_cores': npu_info.cpu_cores,
-    'memory_gb': npu_info.memory_gb,
-    'is_apple_silicon': npu_info.is_apple_silicon,
-    'mlx_available': npu_info.mlx_available,
-    'coremltools_available': npu_info.coremltools_available,
-    'mps_available': npu_info.mps_available,
-    'recommended_backend': npu_info.recommended_backend,
-    'available_backends': npu_info.available_backends
-}
-print(json.dumps(data))
-"#;
-    let output = Command::new("python3.12")
-        .arg("-c")
-        .arg(python_code)
-        .current_dir("..")
-        .output();
-    match output {
-        Ok(out) => {
-            if out.status.success() {
-                let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                serde_json::from_str(&stdout).map_err(|e| format!("NPU 정보 파싱 오류: {}", e))
-            } else {
-                let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-                Err(format!("NPU 감지 실패: {}", stderr))
-            }
-        }
-        Err(e) => Err(format!("NPU 감지 실행 오류: {}", e))
+    let is_apple_silicon = sysctl_value("hw.optional.arm64").as_deref() == Some("1");
+    let chip_name = sysctl_value("machdep.cpu.brand_string").unwrap_or_else(|| "Unknown".to_string());
+    let cpu_cores = sysctl_value("hw.ncpu")
+        .and_then(|v| v.parse::<i32>().ok())
+        .unwrap_or_else(|| std::thread::available_parallelism().map(|n| n.get() as i32).unwrap_or(1));
+    let memory_gb = sysctl_value("hw.memsize")
+        .and_then(|v| v.parse::<i64>().ok())
+        .map(|bytes| (bytes / (1024 * 1024 * 1024)) as i32)
+        .unwrap_or(0);
+
+    let (ane_cores, ane_tops) = if is_apple_silicon { ane_spec(&chip_name) } else { (0, 0.0) };
+
+    let (mlx_available, coremltools_available, torch_available) = probe_ml_backends();
+    let mps_available = is_apple_silicon && torch_available;
+
+    let mut available_backends = Vec::new();
+    if mlx_available {
+        available_backends.push("MLX".to_string());
     }
+    if coremltools_available {
+        available_backends.push("CoreML".to_string());
+    }
+    if mps_available {
+        available_backends.push("MPS".to_string());
+    }
+    if available_backends.is_empty() {
+        available_backends.push("CPU".to_string());
+    }
+    let recommended_backend = available_backends[0].clone();
+
+    Ok(NPUInfo {
+        chip_name,
+        ane_cores,
+        ane_tops,
+        cpu_cores,
+        memory_gb,
+        is_apple_silicon,
+        mlx_available,
+        coremltools_available,
+        mps_available,
+        recommended_backend,
+        available_backends,
+    })
 }
 
 #[tauri::command]
@@ -1541,12 +1592,12 @@ async fn domain_deploy_stack(template: String, region: String) -> Result<String,
 
 #[tauri::command]
 async fn run_autonomous_agent(goal: String, max_iterations: i32) -> Result<String, String> {
-    run_cli_command(&["autonomous-agent", "--goal", &goal, "--max-iterations", &max_iterations.to_string()])
+    run_cli_command(&["code", "agent", &goal, "--propose-only", "--max-steps", &max_iterations.to_string()])
 }
 
 #[tauri::command]
 async fn execute_sub_agent(goal: String, agents: String) -> Result<String, String> {
-    run_cli_command(&["sub-agent", &goal, "--agents", &agents, "--output", "json"])
+    run_cli_command(&["code", "team", &goal, "--propose-only", "--parallel", "3"])
 }
 
 fn main() {

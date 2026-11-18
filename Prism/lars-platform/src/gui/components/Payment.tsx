@@ -1,3 +1,4 @@
+import { planAmount, formatPrice, resolveProvider, PlanTier, BillingCycle } from '../lib/prices';
 import React, { useState, useEffect } from 'react';
 import { CreditCard, AlertCircle, CheckCircle, Loader } from 'lucide-react';
 import './Payment.css';
@@ -13,6 +14,7 @@ interface PaymentProps {
   onSuccess?: () => void;
   onCancel?: () => void;
   isEmbedded?: boolean;
+  language?: string;
 }
 
 export const Payment: React.FC<PaymentProps> = ({
@@ -21,20 +23,25 @@ export const Payment: React.FC<PaymentProps> = ({
   onSuccess,
   onCancel,
   isEmbedded = false,
+  language = 'ko',
 }) => {
-  const [provider, setProvider] = useState<'stripe' | 'kcp'>('stripe');
+  const [provider, setProvider] = useState<'stripe' | 'kcp'>(() => {
+    let stored: string | null = null;
+    try { stored = localStorage.getItem('payment_method'); } catch { stored = null; }
+    return resolveProvider(language, stored);
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
 
-  const prices: Record<string, Record<string, number>> = {
-    pro: { monthly: 19.99, yearly: 199.99 },
-    business: { monthly: 99.99, yearly: 999.99 },
-  };
-
-  const price = prices[tier]?.[billingCycle] || 0;
+  // 결제 수단에 맞는 통화로 금액을 정한다 (국내 결제는 원화)
+  const { amount: price, currency } = planAmount(tier as PlanTier, billingCycle as BillingCycle, provider);
+  const priceText = formatPrice(price, currency);
 
   useEffect(() => {
+    // Save payment method to localStorage
+    localStorage.setItem('payment_method', provider);
+
     // Load KCP JavaScript library when component mounts
     if (provider === 'kcp') {
       const script = document.createElement('script');
@@ -49,12 +56,8 @@ export const Payment: React.FC<PaymentProps> = ({
     try {
       console.log('[KCP] Starting KCP payment process...');
 
-      // KCP pricing
-      const kcpPrices: Record<string, Record<string, number>> = {
-        pro: { monthly: 19_900, yearly: 199_900 },
-        business: { monthly: 99_900, yearly: 999_900 },
-      };
-      const kcpAmount = kcpPrices[tier]?.[billingCycle] || 0;
+      // 국내 결제 금액 (원화)
+      const kcpAmount = planAmount(tier as PlanTier, billingCycle as BillingCycle, 'kcp').amount;
 
       // Generate order ID
       const email = localStorage.getItem('user_email') || 'test@lars-technologies.com';
@@ -183,7 +186,7 @@ export const Payment: React.FC<PaymentProps> = ({
         console.warn('[PAYMENT] Development mode - no auth token required');
       }
 
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8001';
       const endpoint = `${apiUrl}/api/subscription/pay`;
 
       console.log('[PAYMENT] Sending request to:', endpoint);
@@ -307,7 +310,7 @@ export const Payment: React.FC<PaymentProps> = ({
           </div>
           <div className="summary-row">
             <span>가격</span>
-            <span className="summary-value">${price.toFixed(2)}</span>
+            <span className="summary-value">{priceText}</span>
           </div>
         </div>
 
@@ -360,7 +363,13 @@ export const Payment: React.FC<PaymentProps> = ({
             동의하는 것입니다.
           </p>
           <p>
-            14일 이내 전액 환불이 가능합니다.
+            <strong>환불 정책:</strong> 구독 후 14일 이내 전액 환불이 가능합니다. 이후 취소 시 미사용 부분만 환불됩니다.
+          </p>
+          <p>
+            <strong>결제 실패 시:</strong> 카드 거절 등의 사유로 결제가 실패하면 자동으로 3일, 5일, 7일 후에 재시도됩니다. 최종 실패 시 고객 지원(lars@lars-technologies.com)으로 연락주세요.
+          </p>
+          <p style={{fontSize: '0.9rem', color: '#888'}}>
+            환불 신청: lars@lars-technologies.com으로 가입 이메일, 결제 날짜, 환불 사유를 포함한 이메일 발송
           </p>
         </div>
 
@@ -378,7 +387,7 @@ export const Payment: React.FC<PaymentProps> = ({
             ) : (
               <>
                 <CreditCard size={20} />
-                ${price.toFixed(2)} 결제하기
+                {priceText} 결제하기
               </>
             )}
           </button>

@@ -1,3 +1,4 @@
+import { planAmount, formatPrice as formatKrwUsd, resolveProvider, PlanTier, BillingCycle, PayProvider } from '../lib/prices';
 import React, { useState, useEffect } from 'react';
 import { Check, X } from 'lucide-react';
 import './Pricing.css';
@@ -6,23 +7,92 @@ interface Plan {
   tier: string;
   name: string;
   price_monthly: number | string;
-  price_yearly: number | string;
   tokens_per_month: string | number;
   features: string[];
 }
 
 interface PricingProps {
-  onUpgrade?: (tier: string, cycle: 'monthly' | 'yearly') => void;
+  onUpgrade?: (tier: string, cycle: 'monthly') => void;
   isEmbedded?: boolean;
   language?: string;
+  paymentMethod?: 'stripe' | 'kcp' | 'auto';
 }
 
-// 환율 설정 (1 USD = 1,300 KRW)
-const EXCHANGE_RATE = 1300;
+// 언어별 환율 설정
+const EXCHANGE_RATES: Record<string, number> = {
+  ko: 1300,    // 1 USD = 1,300 KRW
+  ja: 150,     // 1 USD = 150 JPY
+  zh: 7,       // 1 USD = 7 CNY
+  en: 1        // USD stays as is
+};
 
-// 가격을 원화로 변환하는 함수
-const convertToKRW = (usdPrice: number): number => {
-  return Math.round(usdPrice * EXCHANGE_RATE / 100) * 100;
+// 언어별 통화 심볼
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  ko: '₩',
+  ja: '¥',
+  zh: '¥',
+  en: '$'
+};
+
+// 결제 방법에 따른 통화 결정
+const getPaymentMethod = (paymentMethod?: string): string => {
+  if (paymentMethod === 'kcp') return 'ko';
+  if (paymentMethod === 'auto') {
+    const stored = localStorage.getItem('payment_method');
+    return stored === 'kcp' ? 'ko' : 'en';
+  }
+  return 'en';
+};
+
+// 가격을 해당 언어의 통화로 변환하는 함수
+const convertPrice = (usdPrice: number, language: string = 'ko', paymentMethod?: string): number => {
+  // 결제 방법이 명시적으로 지정되면 그것을 우선시
+  if (paymentMethod && paymentMethod !== 'auto') {
+    const methodLang = getPaymentMethod(paymentMethod);
+    const rate = EXCHANGE_RATES[methodLang] || EXCHANGE_RATES.ko;
+    if (methodLang === 'en') return usdPrice;
+    return Math.round(usdPrice * rate / 100) * 100;
+  }
+
+  const rate = EXCHANGE_RATES[language] || EXCHANGE_RATES.ko;
+  if (language === 'en') return usdPrice;
+  return Math.round(usdPrice * rate / 100) * 100;
+};
+
+
+// 요금제 카드 가격: 결제 수단이 국내(KCP)면 원화, 아니면 달러. 결제 화면과 같은 가격표를 쓴다.
+const planProvider = (language: string, paymentMethod?: string): PayProvider => {
+  if (paymentMethod === 'kcp' || paymentMethod === 'stripe') return paymentMethod;
+  let stored: string | null = null;
+  try { stored = localStorage.getItem('payment_method'); } catch { stored = null; }
+  return resolveProvider(language, stored);
+};
+const planPriceText = (tier: string, cycle: string, language: string, paymentMethod?: string): string => {
+  const { amount, currency } = planAmount(tier as PlanTier, cycle as BillingCycle, planProvider(language, paymentMethod));
+  return formatKrwUsd(amount, currency);
+};
+// 가격을 문자열로 포맷하는 함수
+const formatPrice = (usdPrice: number, language: string = 'ko', paymentMethod?: string): string => {
+  const convertedPrice = convertPrice(usdPrice, language, paymentMethod);
+
+  // 결제 방법이 KCP면 항상 원화 사용
+  let displayLang = language;
+  if (paymentMethod === 'kcp') {
+    displayLang = 'ko';
+  } else if (paymentMethod === 'auto') {
+    const stored = localStorage.getItem('payment_method');
+    displayLang = stored === 'kcp' ? 'ko' : language;
+  }
+
+  const symbol = CURRENCY_SYMBOLS[displayLang] || '$';
+
+  if (displayLang === 'en') {
+    return `${symbol}${convertedPrice.toFixed(2)}`;
+  } else if (displayLang === 'ko') {
+    return `${symbol}${convertedPrice.toLocaleString('ko-KR')}`;
+  } else {
+    return `${symbol}${convertedPrice.toLocaleString()}`;
+  }
 };
 
 // 언어별 기능 설명 및 제목
@@ -31,10 +101,10 @@ const FEATURE_TRANSLATIONS = {
     title: '플랜 선택',
     description: 'LARS Prism과 함께 AI 추론의 힘을 경험하세요',
     monthlyLabel: '월간 결제',
-    yearlyLabel: '연간 결제 (16% 할인)',
     selectButton: '선택',
     currentButton: '현재 플랜',
     contactButton: '문의',
+    cancellationPolicy: '구독은 언제든지 취소할 수 있습니다. 취소 후 현재 결제 기간이 끝날 때까지 서비스를 계속 이용할 수 있으며, 미사용 부분에 대한 환불은 불가능합니다. 자세한 사항은 이용약관을 참고해주세요.',
     free: [
       '기본 AI 추론',
       '제한적 3D 시각화',
@@ -44,14 +114,14 @@ const FEATURE_TRANSLATIONS = {
     pro: [
       '우선 추론 (2배 빠름)',
       '무제한 3D 시각화',
-      '팀 협업 (5명)',
+      'Workspace (5명)',
       'API 접근 (제한)',
       '이메일 지원',
       '광고 없음'
     ],
     business: [
       '최고 우선순위 (1배 빠름)',
-      '팀 협업 (50명)',
+      'Workspace (50명)',
       '전체 API 접근',
       'SSO 인증',
       '전화 지원 (24/7)',
@@ -75,6 +145,7 @@ const FEATURE_TRANSLATIONS = {
     selectButton: 'Select',
     currentButton: 'Current Plan',
     contactButton: 'Contact',
+    cancellationPolicy: 'You can cancel your subscription at any time. After cancellation, you can continue using the service until the end of your current billing period. No refunds are provided for unused portions. For details, please refer to our Terms of Service.',
     free: [
       'Basic AI Reasoning',
       'Limited 3D Visualization',
@@ -109,39 +180,106 @@ const FEATURE_TRANSLATIONS = {
   }
 };
 
-export const Pricing: React.FC<PricingProps> = ({ onUpgrade, isEmbedded = false, language = 'ko' }) => {
+export const Pricing: React.FC<PricingProps> = ({ onUpgrade, isEmbedded = false, language = 'ko', paymentMethod = 'auto' }) => {
   const [plans, setPlans] = useState<Record<string, Plan>>({});
-  const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
   const [currentTier, setCurrentTier] = useState<string>('free');
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>(
+    paymentMethod === 'auto' ? 'auto' : paymentMethod
+  );
+  const billingCycle = 'monthly'; // 월간 결제만 지원
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchPlans();
-    fetchCurrentSubscription();
+    const initPlans = async () => {
+      setLoading(true);
+      try {
+        await fetchPlans();
+        await fetchCurrentSubscription();
+      } finally {
+        setLoading(false);
+      }
+    };
+    initPlans();
   }, [language]);
+
+  // 기본 요금제 데이터
+  const DEFAULT_PLANS: Record<string, Plan> = {
+    free: {
+      tier: 'free',
+      name: 'Free',
+      price_monthly: 0,
+      tokens_per_month: '10K',
+      features: []
+    },
+    pro: {
+      tier: 'pro',
+      name: 'Pro',
+      price_monthly: 29,
+      price_yearly: 290,
+      tokens_per_month: '1M',
+      features: []
+    },
+    business: {
+      tier: 'business',
+      name: 'Business',
+      price_monthly: 99,
+      price_yearly: 990,
+      tokens_per_month: '10M',
+      features: []
+    },
+    enterprise: {
+      tier: 'enterprise',
+      name: 'Enterprise',
+      price_monthly: 'Custom',
+      price_yearly: 'Custom',
+      tokens_per_month: 'Unlimited',
+      features: []
+    }
+  };
 
   const fetchPlans = async () => {
     try {
-      const response = await fetch('http://localhost:8000/api/subscription/plans');
+      const apiBase = (typeof import.meta !== 'undefined' && import.meta.env.VITE_API_URL)
+        ? `${import.meta.env.VITE_API_URL}/subscription/plans`
+        : `/api/subscription/plans`;
+      console.log('[PRICING] Fetching plans from:', apiBase);
+      const response = await fetch(apiBase);
+      console.log('[PRICING] Response status:', response.status);
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
       const data = await response.json();
+      console.log('[PRICING] Plans data:', data);
 
-      // API 응답의 features를 언어별 번역으로 대체
-      const lang = language || 'ko';
-      const translations = FEATURE_TRANSLATIONS[lang as keyof typeof FEATURE_TRANSLATIONS] || FEATURE_TRANSLATIONS.ko;
-
-      const plansWithTranslations = { ...data.plans };
-      Object.keys(plansWithTranslations).forEach((tier) => {
-        if (translations[tier as keyof typeof translations]) {
-          plansWithTranslations[tier].features = translations[tier as keyof typeof translations];
-        }
-      });
-
-      setPlans(plansWithTranslations);
+      if (!data.plans || Object.keys(data.plans).length === 0) {
+        console.warn('[PRICING] No plans in response, using default plans:', data);
+        applyTranslationsAndSetPlans(DEFAULT_PLANS);
+      } else {
+        applyTranslationsAndSetPlans(data.plans);
+      }
     } catch (err) {
-      console.error('Failed to fetch plans:', err);
-    } finally {
-      setLoading(false);
+      console.error('[PRICING] Failed to fetch plans, using default:', err);
+      // API 호출 실패 시 기본 요금제 사용
+      applyTranslationsAndSetPlans(DEFAULT_PLANS);
     }
+  };
+
+  const applyTranslationsAndSetPlans = (plans: Record<string, Plan>) => {
+    // API 응답의 features를 언어별 번역으로 대체
+    const lang = language || 'ko';
+    const translations = FEATURE_TRANSLATIONS[lang as keyof typeof FEATURE_TRANSLATIONS] || FEATURE_TRANSLATIONS.ko;
+
+    const plansWithTranslations = { ...plans };
+    Object.keys(plansWithTranslations).forEach((tier) => {
+      if (translations[tier as keyof typeof translations]) {
+        plansWithTranslations[tier].features = translations[tier as keyof typeof translations];
+      }
+    });
+
+    console.log('[PRICING] Plans with translations:', plansWithTranslations);
+    setPlans(plansWithTranslations);
   };
 
   const fetchCurrentSubscription = async () => {
@@ -149,7 +287,10 @@ export const Pricing: React.FC<PricingProps> = ({ onUpgrade, isEmbedded = false,
       const token = localStorage.getItem('auth_token');
       if (!token) return;
 
-      const response = await fetch('http://localhost:8000/api/subscription/me', {
+      const apiBase = (typeof import.meta !== 'undefined' && import.meta.env.VITE_API_URL)
+        ? `${import.meta.env.VITE_API_URL}/subscription/me`
+        : `/api/subscription/me`;
+      const response = await fetch(apiBase, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await response.json();
@@ -168,8 +309,14 @@ export const Pricing: React.FC<PricingProps> = ({ onUpgrade, isEmbedded = false,
     }
   };
 
+  console.log('[PRICING RENDER] Loading:', loading, 'Plans:', Object.keys(plans).length);
+
   if (loading) {
     return <div className="pricing-loading">로딩 중...</div>;
+  }
+
+  if (Object.keys(plans).length === 0) {
+    return <div className="pricing-loading">요금제를 불러올 수 없습니다</div>;
   }
 
   const planOrder = ['free', 'pro', 'business', 'enterprise'];
@@ -182,20 +329,6 @@ export const Pricing: React.FC<PricingProps> = ({ onUpgrade, isEmbedded = false,
         <h1>{t.title}</h1>
         <p>{t.description}</p>
 
-        <div className="billing-toggle">
-          <button
-            className={`toggle-btn ${billingCycle === 'monthly' ? 'active' : ''}`}
-            onClick={() => setBillingCycle('monthly')}
-          >
-            {t.monthlyLabel}
-          </button>
-          <button
-            className={`toggle-btn ${billingCycle === 'yearly' ? 'active' : ''}`}
-            onClick={() => setBillingCycle('yearly')}
-          >
-            {t.yearlyLabel}
-          </button>
-        </div>
       </div>
 
       <div className="pricing-grid">
@@ -203,16 +336,7 @@ export const Pricing: React.FC<PricingProps> = ({ onUpgrade, isEmbedded = false,
           const plan = plans[tierKey];
           if (!plan) return null;
 
-          const basePrice =
-            billingCycle === 'monthly' ? plan.price_monthly : plan.price_yearly;
-
-          // 언어에 따라 가격 변환
-          let displayPrice: string | number;
-          if (lang === 'ko' && typeof basePrice === 'number') {
-            displayPrice = convertToKRW(basePrice);
-          } else {
-            displayPrice = basePrice;
-          }
+          const basePrice = plan.price_monthly;
 
           const isCurrentTier = currentTier === tierKey;
 
@@ -228,17 +352,17 @@ export const Pricing: React.FC<PricingProps> = ({ onUpgrade, isEmbedded = false,
               <h3 className="plan-name">{plan.name}</h3>
 
               <div className="plan-price">
-                {typeof displayPrice === 'number' ? (
+                {typeof basePrice === 'number' ? (
                   <>
                     <span className="price-amount">
-                      {lang === 'ko' ? `₩${displayPrice.toLocaleString('ko-KR')}` : `$${displayPrice.toFixed(2)}`}
+                      {planPriceText(tierKey, billingCycle, lang, selectedPaymentMethod)}
                     </span>
                     <span className="price-period">
-                      /{billingCycle === 'monthly' ? (lang === 'ko' ? '월' : '/mo') : (lang === 'ko' ? '년' : '/yr')}
+                      /{planProvider(lang, selectedPaymentMethod) === 'kcp' ? '월' : lang === 'ko' ? '월' : '/mo'}
                     </span>
                   </>
                 ) : (
-                  <span className="price-custom">{displayPrice}</span>
+                  <span className="price-custom">{basePrice}</span>
                 )}
               </div>
 
@@ -269,6 +393,10 @@ export const Pricing: React.FC<PricingProps> = ({ onUpgrade, isEmbedded = false,
         })}
       </div>
 
+      <div className="pricing-cancellation-policy">
+        <p>{t.cancellationPolicy}</p>
+      </div>
+
       <div className="pricing-faq">
         <h2>자주 묻는 질문</h2>
 
@@ -291,15 +419,34 @@ export const Pricing: React.FC<PricingProps> = ({ onUpgrade, isEmbedded = false,
         <div className="faq-item">
           <h4>환불 정책은 무엇인가요?</h4>
           <p>
-            14일 이내 전액 환불이 가능합니다. 그 이후에는 사용하지 않은 부분에
-            대해서만 환불해 드립니다.
+            구독 후 <strong>14일 이내 전액 환불</strong>이 가능합니다. 그 이후에는 사용하지 않은 부분에
+            대해서만 환불해 드립니다. 환불은 고객 지원 센터로 환불 신청 후 <strong>5-7 영업일 내</strong> 원결제 수단으로 반환됩니다.
+          </p>
+        </div>
+
+        <div className="faq-item">
+          <h4>환불은 어떻게 신청하나요?</h4>
+          <p>
+            고객 지원 센터(lars@lars-technologies.com)로 다음 정보와 함께 환불 신청 이메일을 보내주세요:<br/>
+            • 가입 이메일 주소<br/>
+            • 결제 날짜<br/>
+            • 환불 사유<br/>
+            요청 검토 후 24시간 내에 답변 드리겠습니다.
+          </p>
+        </div>
+
+        <div className="faq-item">
+          <h4>결제 실패 시 어떻게 되나요?</h4>
+          <p>
+            카드 거절, 계좌 오류 등으로 결제가 실패하면 자동으로 <strong>3회(3일, 5일, 7일 후) 재시도</strong>됩니다.
+            최종 실패 시 구독이 일시 중지되며, 유효한 결제 수단으로 업데이트하면 서비스가 복구됩니다.
           </p>
         </div>
 
         <div className="faq-item">
           <h4>팀 계정은 어떻게 만드나요?</h4>
           <p>
-            Pro 이상의 플랜에서 팀 협업 기능을 사용할 수 있습니다. 계정 설정에서
+            Pro 이상의 플랜에서 Workspace 기능을 사용할 수 있습니다. 계정 설정에서
             팀원을 초대할 수 있습니다.
           </p>
         </div>

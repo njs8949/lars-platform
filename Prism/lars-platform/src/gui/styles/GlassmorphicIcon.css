@@ -1,0 +1,140 @@
+/* ==================== GLASSMORPHIC ICON STYLES ==================== */
+
+.glass-icon-wrapper {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.glass-icon-container {
+  width: 100%;
+  height: 100%;
+  border-radius: 12px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  box-shadow:
+    0 8px 32px 0 rgba(31, 38, 135, 0.37),
+    inset 0 1px 2px 0 rgba(255, 255, 255, 0.4),
+    inset 0 -4px 8px 0 rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.glass-icon-container:hover {
+  box-shadow:
+    0 12px 40px 0 rgba(31, 38, 135, 0.45),
+    inset 0 1px 2px 0 rgba(255, 255, 255, 0.5),
+    inset 0 -4px 8px 0 rgba(0, 0, 0, 0.15);
+  transform: translateY(-2px);
+}
+
+.glass-icon-frosted {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background:
+    radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.25), transparent 50%),
+    radial-gradient(circle at 70% 70%, rgba(0, 0, 0, 0.1), transparent 50%);
+  pointer-events: none;
+  border-radius: 12px;
+}
+
+.glass-icon-highlight {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 50%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.15) 0%, rgba(255, 255, 255, 0) 100%);
+  pointer-events: none;
+  border-radius: 12px 12px 0 0;
+}
+
+.glass-icon-content {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
+.glass-icon-glow {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 150%;
+  height: 150%;
+  border-radius: 50%;
+  opacity: 0;
+  filter: blur(20px);
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+.glass-icon-wrapper:hover .glass-icon-glow {
+  opacity: 0.3;
+}
+
+/* Responsive sizes */
+@media (max-width: 768px) {
+  .glass-icon-container {
+    border-radius: 10px;
+  }
+
+  .glass-icon-frosted,
+  .glass-icon-highlight {
+    border-radius: 10px;
+  }
+}
+
+/* Animation for loading states */
+@keyframes glass-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.glass-icon-wrapper.loading .glass-icon-container {
+  animation: glass-pulse 2s ease-in-out infinite;
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+  .glass-icon-container {
+    box-shadow:
+      0 8px 32px 0 rgba(31, 38, 135, 0.25),
+      inset 0 1px 2px 0 rgba(255, 255, 255, 0.15),
+      inset 0 -4px 8px 0 rgba(0, 0, 0, 0.3);
+  }
+
+  .glass-icon-container:hover {
+    box-shadow:
+      0 12px 40px 0 rgba(31, 38, 135, 0.35),
+      inset 0 1px 2px 0 rgba(255, 255, 255, 0.2),
+      inset 0 -4px 8px 0 rgba(0, 0, 0, 0.4);
+  }
+
+  .glass-icon-frosted {
+    background:
+      radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.15), transparent 50%),
+      radial-gradient(circle at 70% 70%, rgba(0, 0, 0, 0.2), transparent 50%);
+  }
+
+  .glass-icon-highlight {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0) 100%);
+  }
+}

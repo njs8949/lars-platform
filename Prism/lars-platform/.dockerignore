@@ -1,0 +1,16 @@
+node_modules
+**/node_modules
+.git
+venv
+.venv
+**/__pycache__
+**/*.pyc
+src-tauri/target
+src-tauri/gen
+training
+evals
+dist-old-*
+backups
+*.gguf
+*.safetensors
+*.bin.part

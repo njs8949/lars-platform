@@ -1,0 +1,92 @@
+{
+  "productName": "LARS Prism",
+  "version": "1.0.0",
+  "identifier": "com.lars-technologies.prism",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "LARS Prism",
+        "width": 1200,
+        "height": 700,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "app"
+    ],
+    "identifier": "com.lars-technologies.prism",
+    "icon": [
+      "icons/icon.png"
+    ]
+  },
+  "ios": {
+    "minimumSystemVersion": "13.0",
+    "deploymentTarget": "13.0",
+    "teamId": "YOUR_APPLE_TEAM_ID",
+    "provisioningProfile": "YOUR_PROVISIONING_PROFILE",
+    "signingIdentity": "iPhone Developer",
+    "capabilities": [
+      "network",
+      "storage",
+      "camera",
+      "microphone"
+    ],
+    "frameworks": [
+      "Foundation",
+      "WebKit",
+      "UIKit"
+    ]
+  },
+  "tauri": {
+    "cli": {
+      "bundle": {
+        "active": true,
+        "targets": [
+          "app"
+        ],
+        "iosFormat": "app"
+      }
+    },
+    "allowlist": {
+      "all": false,
+      "http": {
+        "request": true,
+        "fetch": true,
+        "scope": ["http://*", "https://*"]
+      },
+      "fs": {
+        "all": false,
+        "scope": [
+          "$CACHE/*",
+          "$DOCUMENT/*",
+          "$DOWNLOAD/*",
+          "$PICTURE/*"
+        ]
+      },
+      "window": {
+        "all": false,
+        "create": true,
+        "center": true,
+        "requestUserAttention": true,
+        "setResizable": true,
+        "setFullscreen": true
+      },
+      "notification": {
+        "all": true
+      }
+    }
+  }
+}

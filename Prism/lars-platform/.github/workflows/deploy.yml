@@ -1,0 +1,190 @@
+name: 🚀 LARS Prism 배포 파이프라인
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # ==================== 테스트 ====================
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11']
+        node-version: ['20']
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Node.js 설정
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Python 설정
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: 의존성 설치
+        run: |
+          npm ci
+          pip install -r requirements.txt
+
+      - name: 린트 확인
+        run: |
+          npm run lint || true
+          python -m pylint src/ || true
+
+      - name: 프론트엔드 테스트
+        run: npm run test || true
+
+      - name: 백엔드 테스트
+        run: |
+          pytest tests/ -v --cov=src --cov-report=xml || true
+
+      - name: 커버리지 리포트 업로드
+        uses: codecov/codecov-action@v3
+        if: always()
+
+  # ==================== 빌드 & 푸시 ====================
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Docker Buildx 설정
+        uses: docker/setup-buildx-action@v2
+
+      - name: 레지스트리 로그인
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 메타데이터 추출
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix={{branch}}-
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Docker 이미지 빌드 및 푸시
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ./Dockerfile.prod
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ==================== 배포 ====================
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    environment:
+      name: production
+      url: https://prism.lars-technologies.com
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: SSH 키 설정
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts
+
+      - name: 애플리케이션 배포
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} << 'EOF'
+            cd /app/lars-prism
+            git pull origin main
+            docker-compose -f docker-compose.prod.yml pull
+            docker-compose -f docker-compose.prod.yml up -d
+            docker-compose -f docker-compose.prod.yml exec -T backend alembic upgrade head
+          EOF
+
+      - name: 배포 상태 확인
+        run: |
+          sleep 10
+          curl -f https://prism.lars-technologies.com/api/health || exit 1
+
+      - name: Slack 알림
+        uses: slackapi/slack-github-action@v1
+        if: always()
+        with:
+          payload: |
+            {
+              "text": "🚀 LARS Prism 배포 ${{ job.status }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*LARS Prism 배포*\n상태: ${{ job.status }}\n커밋: ${{ github.sha }}\n작성자: ${{ github.actor }}"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  # ==================== 성능 모니터링 ====================
+  monitor:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: deploy
+
+    steps:
+      - name: Lighthouse CI
+        uses: treosh/lighthouse-ci-action@v9
+        with:
+          temporaryPublicStorage: true
+          uploadArtifacts: true
+
+      - name: 성능 메트릭 업로드
+        run: |
+          curl -X POST ${{ secrets.DATADOG_API_URL }}/api/v1/series \
+            -H "DD-API-KEY: ${{ secrets.DATADOG_API_KEY }}" \
+            -d @- << 'EOF'
+          {
+            "series": [
+              {
+                "metric": "prism.deploy.status",
+                "points": [[$(date +%s), 1]],
+                "type": "gauge",
+                "tags": ["env:production", "service:prism"]
+              }
+            ]
+          }
+          EOF

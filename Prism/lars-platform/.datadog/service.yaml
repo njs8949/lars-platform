@@ -1,0 +1,26 @@
+schemaVersion: v2
+metadata:
+  name: lars-prism-auto
+  displayName: "lars-prism-auto"
+  description: "Service definition for lars-prism-auto"
+service:
+  name: lars-prism-auto
+  team: platform
+contact:
+  email: devops@lars-technologies.com
+tags:
+  - env:production
+  - platform:lars
+links:
+  - name: GitHub
+    url: https://github.com/LARS-technologies/lars-platform
+  - name: Runbook
+    url: https://wiki.lars-technologies.com/lars-prism-auto
+infrastructure:
+  environments:
+    production:
+      tags:
+        - env:production
+        - service:lars-prism-auto
+        - host:ec2
+        - team:platform
