@@ -1,0 +1,56 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 10s
+    send_batch_size: 256
+
+  resource:
+    attributes:
+      - key: service.name
+        value: lars-prism-backend
+        action: upsert
+      - key: service.version
+        value: "1.0.0"
+        action: upsert
+      - key: deployment.environment
+        value: production
+        action: upsert
+
+exporters:
+  datadog:
+    api:
+      key: "${DD_API_KEY}"
+    host:
+      hostname: "datadog-agent"
+      port: 8126
+    host_metadata:
+      enabled: true
+      tags:
+        - "env:production"
+        - "service:lars-prism-backend"
+        - "stream:multi"
+      use_resource_metadata: true
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch, resource]
+      exporters: [datadog]
+
+    metrics:
+      receivers: [otlp]
+      processors: [batch, resource]
+      exporters: [datadog]
+
+    logs:
+      receivers: [otlp]
+      processors: [batch, resource]
+      exporters: [datadog]

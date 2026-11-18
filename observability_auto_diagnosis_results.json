@@ -1,0 +1,36 @@
+{
+  "test_name": "LARS Prism 옵저버빌리티 및 자동 진단 시스템 테스트",
+  "timestamp": "2026-09-04T20:14:50.251239",
+  "observability_categories": 5,
+  "known_issues": 8,
+  "error_categories": 9,
+  "supported_services": [
+    "Sentry",
+    "Rollbar",
+    "Bugsnag",
+    "Datadog",
+    "New Relic",
+    "AWS CloudWatch",
+    "ELK Stack",
+    "Splunk",
+    "Papertrail",
+    "Jaeger",
+    "Zipkin",
+    "Prometheus",
+    "Grafana"
+  ],
+  "automation_features": [
+    "Auto Service Recommendation",
+    "Known Issues Database",
+    "Automatic Error Classification",
+    "Auto Solution Suggestion",
+    "Dashboard Generation",
+    "Alert Configuration",
+    "Auto Recovery System",
+    "Periodic Reporting",
+    "Cost Analysis",
+    "AI-based Diagnosis"
+  ],
+  "status": "✅ All tests passed",
+  "success_rate": "100%"
+}

@@ -1,0 +1,265 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: lars-prism
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prism-config
+  namespace: lars-prism
+data:
+  DATABASE_URL: "postgresql://prism_user:${POSTGRES_PASSWORD}@postgres.lars-prism.svc.cluster.local:5432/lars_prism"
+  REDIS_URL: "redis://redis.lars-prism.svc.cluster.local:6379/0"
+  ENVIRONMENT: "production"
+  LOG_LEVEL: "info"
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: prism-secrets
+  namespace: lars-prism
+type: Opaque
+stringData:
+  DATABASE_PASSWORD: "${POSTGRES_PASSWORD}"
+  REDIS_PASSWORD: "${REDIS_PASSWORD}"
+  JWT_SECRET: "your-jwt-secret-key-here"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prism-backend
+  namespace: lars-prism
+  labels:
+    app: prism
+    component: backend
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: prism
+      component: backend
+  template:
+    metadata:
+      labels:
+        app: prism
+        component: backend
+    spec:
+      serviceAccountName: prism-backend
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+
+      containers:
+      - name: backend
+        image: ghcr.io/lars-technologies/lars-prism:latest
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 8000
+          protocol: TCP
+
+        envFrom:
+        - configMapRef:
+            name: prism-config
+        - secretRef:
+            name: prism-secrets
+
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: 2000m
+            memory: 2Gi
+
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+
+        volumeMounts:
+        - name: logs
+          mountPath: /app/logs
+        - name: uploads
+          mountPath: /app/uploads
+
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+
+      volumes:
+      - name: logs
+        emptyDir: {}
+      - name: uploads
+        persistentVolumeClaim:
+          claimName: prism-uploads
+
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - prism
+              topologyKey: kubernetes.io/hostname
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prism-backend
+  namespace: lars-prism
+  labels:
+    app: prism
+    component: backend
+spec:
+  type: ClusterIP
+  selector:
+    app: prism
+    component: backend
+  ports:
+  - name: http
+    port: 8000
+    targetPort: http
+    protocol: TCP
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: prism-backend-hpa
+  namespace: lars-prism
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: prism-backend
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prism-uploads
+  namespace: lars-prism
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 100Gi
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: prism-network-policy
+  namespace: lars-prism
+spec:
+  podSelector:
+    matchLabels:
+      app: prism
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 8000
+  egress:
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 5432
+    - protocol: TCP
+      port: 6379
+  - to:
+    - podSelector:
+        matchLabels:
+          app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prism-backend
+  namespace: lars-prism
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: prism-backend
+  namespace: lars-prism
+rules:
+- apiGroups: [""]
+  resources: ["configmaps", "secrets"]
+  verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: prism-backend
+  namespace: lars-prism
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: prism-backend
+subjects:
+- kind: ServiceAccount
+  name: prism-backend
+  namespace: lars-prism

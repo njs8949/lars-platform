@@ -1,0 +1,3014 @@
+import React, { useState, useEffect } from 'react';
+import PptxGenJS from 'pptxgenjs';
+// import { initializeDatadogRUM, trackCustomEvent } from './rum-init';
+
+// Tauri imports - conditional for web/desktop
+const isTauri = typeof window !== 'undefined' && '__TAURI_IPC__' in window;
+let invoke: any = async () => null;
+let listen: any = async () => null;
+let open: any = async () => null;
+let confirm_dialog: any = async () => false;
+
+if (isTauri) {
+  try {
+    const tauri = await import('@tauri-apps/api/tauri');
+    const event = await import('@tauri-apps/api/event');
+    const dialog = await import('@tauri-apps/api/dialog');
+    invoke = tauri.invoke;
+    listen = event.listen;
+    open = dialog.open;
+    confirm_dialog = dialog.ask;
+  } catch (e) {
+    console.warn('Tauri not available, running in web mode');
+  }
+}
+import Files from './Files';
+import Security from './Security';
+import SecurityHub from './SecurityHub';
+import Terminal from './Terminal';
+import Logs from './Logs';
+import Artifacts from './Artifacts';
+import AmazonQAssistant from './AmazonQAssistant';
+import Ecosystem from './Ecosystem';
+import Settings from './Settings';
+import Statistics from './Statistics';
+import WorkspaceMode from './components/WorkspaceMode';
+import WorkspaceResult from './components/WorkspaceResult';
+import SourceCitations from './components/SourceCitations';
+import { Auth } from './components/Auth';
+import { GlassmorphicIcon } from './components/GlassmorphicIcon';
+import GenerationResult from './components/GenerationResult';
+import VoiceVisualizer from './components/VoiceVisualizer';
+import DocumentGenerator from './components/DocumentGenerator';
+import PresentationGenerator from './components/PresentationGenerator';
+import CodeAnalyzer from './components/CodeAnalyzer';
+import ImageGenerator from './components/ImageGenerator';
+import RekoraImageGenerator from './components/RekoraImageGenerator';
+import PresentationViewer from './components/PresentationViewer';
+// Tauri 앱용 간단한 홈페이지 (대시보드는 웹 브라우저에서 사용)
+import HomePage from './HomePage';
+// import ScrapingDashboard from './ScrapingDashboard';
+// import OCRPanel from './OCRPanel';
+// import ChangeDetectionMonitor from './ChangeDetectionMonitor';
+// import SEOAnalyticsDashboard from './SEOAnalyticsDashboard';
+// import CRMDashboard from './CRMDashboard';
+// import AdvancedWorkflowExecutor from './AdvancedWorkflowExecutor';
+// import PPTGenerationDashboard from './PPTGenerationDashboard';
+// import IntegrationDashboard from './IntegrationDashboard';
+import { getToken, clearToken, getCurrentUser, User as AuthUser, logout, getStoredUser, setUser as setStoredUser } from './lib/auth';
+import { autoDetectGenerationType, generateContentStream, parseStreamChunks } from './lib/generation';
+import { textToSpeech } from './lib/tts';
+import { startSpeechRecognition, stopSpeechRecognition, isRecording } from './lib/stt';
+import { WebsiteThemePreview, PresentationThemePreview, DocumentThemePreview } from './components/ThemePreview';
+import { ThemeLibrary } from './components/ThemeLibrary';
+import { testElevenLabsAPI, listAvailableVoices } from './lib/tts-test';
+import { AgentPoolVisualization } from './components/AgentPoolVisualization';
+import { AgentPoolState, AgentPoolConfig, AgentTask } from '../types/agent';
+import {
+  FolderPlus,
+  ShieldCheck,
+  Terminal as TerminalIcon,
+  ScrollText,
+  Box,
+  MessageSquare,
+  Search,
+  Plus,
+  Play,
+  CornerDownLeft,
+  LayoutGrid,
+  ChevronDown,
+  X,
+  Zap,
+  Brain,
+  Sparkles,
+  Shield,
+  Search as SearchIcon,
+  Globe,
+  Users,
+  FolderOpen,
+  LogOut,
+  Mic,
+  Volume2,
+  GitBranch,
+  ClipboardList,
+  BarChart3,
+  Palette,
+  FileText,
+  PresentationIcon,
+  Globe as GlobeIcon,
+  Eye,
+  TrendingUp,
+  Mail
+} from 'lucide-react';
+import './App.css';
+import './components/GenerationResult.css';
+
+// 다국어 텍스트
+const TEXTS = {
+  ko: {
+    chat: '채팅',
+    ecosystem: '에코시스템',
+    recentChats: '최근 대화',
+    fastCreative: 'Fast & Creative',
+    deepContext: 'Deep Context',
+    secureLogic: 'Secure Logic',
+    researchFact: 'Research & Fact',
+    liveTrends: 'Live Trends',
+    logOut: '로그아웃',
+    inputPlaceholder: '메세지 보내기 (Shift+Enter로 줄바꿈)',
+    query: '쿼리',
+    dev: '개발',
+    subAgent: '서브 에이전트',
+    orchestrated: '자동 조율',
+    harmonized: '협력 조화',
+    themes: '디자인 테마',
+    website: '웹사이트',
+    presentation: '프레젠테이션',
+    document: '문서',
+  },
+  en: {
+    chat: 'Chat',
+    ecosystem: 'Ecosystem',
+    recentChats: 'Recent Chats',
+    fastCreative: 'Fast & Creative',
+    deepContext: 'Deep Context',
+    secureLogic: 'Secure Logic',
+    researchFact: 'Research & Fact',
+    liveTrends: 'Live Trends',
+    logOut: 'Logout',
+    inputPlaceholder: 'Send message (Shift+Enter for new line)',
+    query: 'Query',
+    dev: 'Development',
+    subAgent: 'Sub-Agent',
+    orchestrated: 'Auto Orchestration',
+    harmonized: 'Harmonized Collaboration',
+    themes: 'Design Themes',
+    website: 'Website',
+    presentation: 'Presentation',
+    document: 'Document',
+  },
+  ja: {
+    chat: 'チャット',
+    ecosystem: 'エコシステム',
+    recentChats: '最近のチャット',
+    fastCreative: 'Fast & Creative',
+    deepContext: 'Deep Context',
+    secureLogic: 'Secure Logic',
+    researchFact: 'Research & Fact',
+    liveTrends: 'Live Trends',
+    logOut: 'ログアウト',
+    inputPlaceholder: 'メッセージを送信 (Shift+Enterで改行)',
+    query: 'クエリ',
+    dev: '開発',
+    subAgent: 'サブエージェント',
+    orchestrated: '自動編成',
+    harmonized: '調和協力',
+    themes: 'デザインテーマ',
+    website: 'ウェブサイト',
+    presentation: 'プレゼンテーション',
+    document: 'ドキュメント',
+  },
+  zh: {
+    chat: '聊天',
+    ecosystem: '生态系统',
+    recentChats: '最近聊天',
+    fastCreative: 'Fast & Creative',
+    deepContext: 'Deep Context',
+    secureLogic: 'Secure Logic',
+    researchFact: 'Research & Fact',
+    liveTrends: 'Live Trends',
+    logOut: '注销',
+    inputPlaceholder: '输入课程 (Shift+Enter换行)',
+    query: '查询',
+    dev: '开发',
+    subAgent: '子代理',
+    orchestrated: '自动编排',
+    harmonized: '和谐协作',
+    themes: '设计主题',
+    website: '网站',
+    presentation: '演示文稿',
+    document: '文档',
+  }
+};
+
+interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+interface ChatItem {
+  id: string;
+  title: string;
+  date: string;
+  input?: string;
+  response?: string;
+  messages?: ChatMessage[];
+}
+
+interface AttachedFile {
+  name: string;
+  path: string;
+}
+
+interface TokenInfo {
+  input: number;
+  output: number;
+  total: number;
+}
+
+const CodeAgentRenderer = ({ content, onApplyPatch, onAppControl, tokens }: { content: string, onApplyPatch: (patchContent: string) => void, onAppControl: (script: string) => void, tokens?: { input: number; output: number; total: number } }) => {
+  // JSON 형식 파싱 시도 (토큰 정보 포함 여부 확인)
+  let displayContent = content;
+  let tokenInfo: TokenInfo | null = tokens || null;
+  let usedModel = '';
+
+  // 메타데이터 라인 제거
+  displayContent = content
+    .split('\n')
+    .filter(line => !line.startsWith('[TOKEN_UPDATE:') && !line.startsWith('[TOKENS_FINAL:'))
+    .join('\n');
+
+  try {
+    const parsed = JSON.parse(content);
+    if (parsed.content && parsed.tokens) {
+      displayContent = parsed.content;
+      tokenInfo = parsed.tokens;
+      usedModel = parsed.model || '';
+    }
+  } catch (e) {
+    // JSON이 아니면 그냥 원본 content 사용
+    displayContent = displayContent;
+  }
+
+  const hasPatch = displayContent.includes("<<<< SEARCH");
+  const hasAppControl = displayContent.includes("<<<< APP_CONTROL");
+
+  let appScript = "";
+  if (hasAppControl) {
+    const match = displayContent.match(/<<<< APP_CONTROL\s*?\n?([\s\S]*?)\n?>>>>/);
+    if (match) appScript = match[1].trim();
+  }
+
+  // 사용자에게 불필요한 내부 정보 필터링
+  const filteredContent = displayContent
+    .split('\n')
+    .filter(line => !line.match(/^\[MCP Server\]|\^\[Router\]|\^\[AWS\]|\^\[검색 제공자\]|\^\[포트 번호\]/))
+    .join('\n')
+    .trim();
+
+  return (
+    <div className="agent-response-container">
+      <div className="response-text">{filteredContent}</div>
+      {hasPatch && (
+        <div className="patch-action-box">
+          <div className="patch-info">
+            <span className="patch-icon">🔬</span>
+            <span>LARS Rekora가 수술적 패치를 생성했습니다.</span>
+          </div>
+          <button className="apply-patch-btn" onClick={() => onApplyPatch(displayContent)}>변경 사항 적용</button>
+        </div>
+      )}
+      {hasAppControl && (
+        <div className="patch-action-box" style={{borderColor: '#a855f7', background: 'rgba(168, 85, 247, 0.1)'}}>
+          <div className="patch-info">
+            <span className="patch-icon">🍎</span>
+            <span>LARS Omni-Control이 앱 제어 명령을 준비했습니다.</span>
+          </div>
+          <button className="apply-patch-btn" style={{background: '#a855f7'}} onClick={() => onAppControl(appScript)}>명령 실행 (Execute)</button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [activeTab, setActiveTab] = useState<'chat' | 'settings' | 'ecosystem' | 'statistics' | 'themes' | 'scraping' | 'ocr' | 'change-detection' | 'seo' | 'crm' | 'workflows' | 'ppt-generation' | 'integration'>('chat');
+  const [generationType, setGenerationType] = useState<string | null>(null);
+  const [generationMetadata, setGenerationMetadata] = useState<any | null>(null);
+  const [showAboutModal, setShowAboutModal] = useState(false);
+  const [input, setInput] = useState('');
+  const [response, setResponse] = useState('');
+  const [presentationSlides, setPresentationSlides] = useState<any[]>([]);
+  const [status, setStatus] = useState('IDLE');
+  const [user, setUser] = useState({
+    name: 'Jongsoo Nam',
+    email: 'lars@lars-technologies.com',
+    avatarUrl: null as string | null
+  });
+  const [language] = useState<'ko' | 'en' | 'ja' | 'zh'>(() => {
+    // localStorage에서 언어 설정 확인, 없으면 시스템 언어 감지
+    const saved = localStorage.getItem('app_language');
+    if (saved === 'ko' || saved === 'en' || saved === 'ja' || saved === 'zh') {
+      return saved;
+    }
+
+    // 시스템 언어에 따라 자동 감지
+    const browserLang = navigator.language.toLowerCase();
+    if (browserLang.startsWith('ko')) return 'ko';
+    if (browserLang.startsWith('ja')) return 'ja';
+    if (browserLang.startsWith('zh')) return 'zh';
+    return 'ko'; // 기본값 한국어
+  });
+  const [generationMode, setGenerationMode] = useState<'workspace' | 'chat'>('chat');
+  const [showHarmonizedConfirm, setShowHarmonizedConfirm] = useState(false);
+  const [harmonizedData, setHarmonizedData] = useState<any>(null);
+  const [voiceMode, setVoiceMode] = useState<'off' | 'input' | 'output'>('off');
+  const [modelType, setModelType] = useState<string>(() => localStorage.getItem('modelType') || 'LARS-Native');
+  const [detectedAgents, setDetectedAgents] = useState<any>(null);
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [themeMenuOpen, setThemeMenuOpen] = useState(false);
+  const [selectedThemeType, setSelectedThemeType] = useState<'website' | 'presentation' | 'document'>('website');
+  const [selectedThemes, setSelectedThemes] = useState({
+    website: 'minimal',
+    presentation: 'corporate',
+    document: 'professional'
+  });
+  const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
+  const [workspaceSteps, setWorkspaceSteps] = useState<any[]>([]);
+  const [searchSources, setSearchSources] = useState<any[]>([]);
+  const [deleteNotification, setDeleteNotification] = useState<{show: boolean, message: string}>({show: false, message: ''});
+
+  // Prism 3계층 아키텍처 사용자 ID
+  const [userId] = useState<string>(() => {
+    const stored = localStorage.getItem('prism_user_id');
+    if (stored) return stored;
+    const generated = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    localStorage.setItem('prism_user_id', generated);
+    return generated;
+  });
+
+  // Greeting 멘트
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    // authUser에서 사용자명을 가져옴 (로그인한 실제 사용자명)
+    const userName = authUser?.username || 'LARS User';
+
+    if (language === 'ko') {
+      if (hour < 12) {
+        return {
+          title: `좋은 아침입니다, ${userName}님!`,
+          subtitle: 'LARS Prism과 함께 하루를 시작하세요.',
+          hint: '문서, 코드, 이미지... 무엇이든 만들어드립니다!',
+        };
+      } else if (hour < 18) {
+        return {
+          title: `안녕하세요, ${userName}님!`,
+          subtitle: 'LARS Prism이 함께합니다.',
+          hint: '생산성을 높이는 모든 것을 한곳에서',
+        };
+      } else {
+        return {
+          title: `좋은 저녁입니다, ${userName}님!`,
+          subtitle: 'LARS Prism과 함께 저녁을 보내세요.',
+          hint: '창의적인 아이디어를 현실로 만드세요',
+        };
+      }
+    } else {
+      if (hour < 12) {
+        return {
+          title: `Good morning, ${userName}!`,
+          subtitle: 'Start your day with LARS Prism.',
+          hint: 'Documents, code, images... create anything!',
+        };
+      } else if (hour < 18) {
+        return {
+          title: `Hello, ${userName}!`,
+          subtitle: 'LARS Prism is here for you.',
+          hint: 'Boost your productivity in one place',
+        };
+      } else {
+        return {
+          title: `Good evening, ${userName}!`,
+          subtitle: 'Spend your evening with LARS Prism.',
+          hint: 'Turn your creative ideas into reality',
+        };
+      }
+    }
+  };
+
+  // --- 실시간 토큰 업데이트 ---
+  const [currentTokens, setCurrentTokens] = useState({ input: 0, output: 0, total: 0 });
+
+  // --- Enhanced 5-Tier Engine State ---
+  const [activeModel, setActiveModel] = useState('LARS-Native');
+  const [activeModelName, setActiveModelName] = useState('Fast & Creative');
+  const [showModelMenu, setShowModelMenu] = useState(false);
+  const [dropdownTab, setDropdownTab] = useState<'core' | 'extended'>('core');
+
+  const [chatHistory, setChatHistory] = useState<ChatItem[]>([]);
+  const [currentChat, setCurrentChat] = useState<ChatItem | null>(null);
+  const [hoveredChatId, setHoveredChatId] = useState<string | null>(null);
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+  const [projectPath, setProjectPath] = useState<string>('');
+  const [showAddMenu, setShowAddMenu] = useState(false);
+  const [showQuickMenu, setShowQuickMenu] = useState<'none' | 'files' | 'security' | 'terminal' | 'logs' | 'artifacts' | 'amazon-q'>('none');
+
+  const updateModelStates = (persona: string) => {
+    const modelMapping: {[key: string]: string} = {
+      'LARS-Native': 'Fast & Creative',
+      'LARS-Cosmos': 'Deep Context',
+      'LARS-Prime': 'Secure Logic',
+      'Luminaic': 'Logic & Analysis',
+      'Aivora': 'Emotional AI',
+      'Rekora': '3D Design',
+      'Synzora': 'Data Graph'
+    };
+    setActiveModel(persona);
+    setActiveModelName(modelMapping[persona] || persona);
+  };
+
+  const getOllamaModelName = (modelId: string): string => {
+    const modelMap: {[key: string]: string} = {
+      'LARS-Native': 'lars-native',
+      'LARS-Cosmos': 'lars-cosmos',
+      'LARS-Prime': 'lars-prime',
+      'Luminaic': 'lars-cosmos',
+      'Aivora': 'lars-native',
+      'Rekora': 'lars-rekora',
+      'Synzora': 'lars-synzora'
+    };
+    return modelMap[modelId] || 'lars-native';
+  };
+
+  const handleModelChange = async (persona: string) => {
+    updateModelStates(persona);
+    setShowModelMenu(false);
+    try {
+      if (window.__TAURI_IPC__) {
+        const currentConfig = await invoke<any>('load_config');
+        await invoke('save_config', { config: { ...currentConfig, modelType: persona } });
+      }
+    } catch (err) { console.error('Model change error:', err); }
+  };
+
+  // Initialize Datadog RUM on mount (optional monitoring)
+  // React.useEffect(() => {
+  //   initializeDatadogRUM();
+  //   trackCustomEvent('app_initialized', {
+  //     version: process.env.REACT_APP_VERSION || '1.0.0',
+  //     environment: process.env.REACT_APP_ENV || 'production'
+  //   });
+  // }, []);
+
+  // 인증 상태 확인
+  React.useEffect(() => {
+    const checkAuthStatus = async () => {
+      const token = getToken();
+
+      // 1. localStorage에 저장된 사용자 정보 먼저 확인
+      const storedUser = getStoredUser();
+      if (storedUser && token) {
+        console.log('[AUTH] localStorage에서 사용자 정보 로드:', storedUser.username);
+        setAuthUser(storedUser);
+        setIsAuthenticated(true);
+        setUser({
+          name: storedUser.username,
+          email: storedUser.email,
+          avatarUrl: null
+        });
+        return;
+      }
+
+      // 2. 토큰이 있으면 서버에서 사용자 정보 확인
+      try {
+        if (token) {
+          const user = await getCurrentUser(token);
+          console.log('[AUTH] 서버에서 사용자 정보 로드:', user.username);
+          setAuthUser(user);
+          setStoredUser(user); // localStorage에 저장
+          setIsAuthenticated(true);
+          setUser({
+            name: user.username,
+            email: user.email,
+            avatarUrl: null
+          });
+        } else {
+          // 토큰이 없으면 로그인 화면 표시 (필수)
+          setIsAuthenticated(false);
+        }
+      } catch (err) {
+        console.error('[AUTH] 사용자 정보 로드 실패:', err);
+        clearToken();
+        setIsAuthenticated(false);
+      }
+    };
+    checkAuthStatus();
+  }, []);
+
+  const handleLogout = async () => {
+    try {
+      const token = getToken();
+      if (token) {
+        await logout(token);
+      }
+    } catch (err) {
+      console.error('Logout error:', err);
+    } finally {
+      clearToken();
+      setIsAuthenticated(false);
+      setAuthUser(null);
+    }
+  };
+
+
+  // Tauri 이벤트 리스너 설정
+  React.useEffect(() => {
+    const setupListeners = async () => {
+      // Tauri가 없으면 스킵 (웹 개발 서버)
+      if (!window.__TAURI_IPC__) {
+        console.log('[LISTENER] Tauri not available, skipping');
+        return;
+      }
+
+      const { listen } = await import('@tauri-apps/api/event');
+      console.log('[LISTENER] Starting listener setup...');
+
+      try {
+        await listen<[number, number]>('token-update', (event) => {
+          const [input, output] = event.payload;
+          setCurrentTokens({ input, output, total: input + output });
+        });
+      } catch (e) {
+        console.warn('[LISTENER] token-update listener failed:', e);
+      }
+
+      try {
+        await listen<[number, number, number]>('tokens-final', (event) => {
+          const [input, output, total] = event.payload;
+          setCurrentTokens({ input, output, total });
+        });
+      } catch (e) {
+        console.warn('[LISTENER] tokens-final listener failed:', e);
+      }
+
+      try {
+        await listen<string>('streaming-content', (event) => {
+          console.log('[EVENT] streaming-content received:', event.payload.substring(0, 50));
+          setResponse(prev => {
+            console.log('[STATE] updating response with:', event.payload.substring(0, 30));
+            return prev + event.payload;
+          });
+        });
+      } catch (e) {
+        console.warn('[LISTENER] streaming-content listener failed:', e);
+      }
+
+      console.log('[LISTENER] All listeners registered successfully');
+    };
+
+    setupListeners().catch(err => console.error('리스너 설정 실패:', err));
+  }, []);
+
+  const [executionMode, setExecutionMode] = useState<'query' | 'dev'>('query');
+  const [useSubAgentMode, setUseSubAgentMode] = useState(false);
+  const [agentPoolState, setAgentPoolState] = useState<AgentPoolState | null>(null);
+
+  const handleSelectProjectPath = async () => {
+    const selected = await open({ directory: true, multiple: false, title: '프로젝트 폴더 선택' });
+    if (selected && typeof selected === 'string') setProjectPath(selected);
+  };
+
+  // 생성된 콘텐츠 자동 저장 (사용자가 위치 선택 가능)
+  // 마크다운을 PPTX로 변환
+  const markdownToPPTX = (markdown: string): Blob => {
+    const pres = new PptxGenJS();
+    pres.defineLayout({ name: 'LAYOUT1', width: 10, height: 7.5 });
+
+    // 색상 팔레트
+    const colors = [
+      { rgb: '4267EA' },    // 보라파랑
+      { rgb: 'F093FB' },    // 분홍
+      { rgb: 'F5576C' },    // 빨강
+      { rgb: '4FACFE' },    // 하늘
+      { rgb: '00F2FE' },    // 청록
+      { rgb: '43E97B' },    // 초록
+      { rgb: '38F9D7' },    // 민트
+      { rgb: 'FA709A' },    // 코랄
+      { rgb: 'FEE140' },    // 노랑
+    ];
+
+    // 슬라이드 파싱
+    const slides = markdown.split('---').map(s => s.trim()).filter(s => s);
+
+    slides.forEach((slideText, idx) => {
+      const lines = slideText.split('\n').map(l => l.trim()).filter(l => l);
+      let title = '';
+      let bullets: string[] = [];
+
+      for (const line of lines) {
+        if (line.startsWith('#')) {
+          title = line.replace(/^#+\s*/, '');
+        } else if (line.startsWith('-') || line.startsWith('•') || line.startsWith('*')) {
+          bullets.push(line.replace(/^[-•*]\s+/, ''));
+        } else if (title === '' && line) {
+          title = line;
+        } else if (line && title !== '') {
+          bullets.push(line);
+        }
+      }
+
+      const slide = pres.addSlide();
+      const bgColor = colors[idx % colors.length];
+      slide.background = bgColor;
+
+      // 제목
+      slide.addText(title, {
+        x: 0.5,
+        y: 0.8,
+        w: 9,
+        h: 1.2,
+        fontSize: 48,
+        bold: true,
+        color: 'FFFFFF',
+        align: 'left',
+      });
+
+      // 컨텐츠
+      const bulletText = bullets.map((b, i) => ({
+        text: b,
+        options: { fontSize: 28, color: 'FFFFFF' },
+      }));
+
+      slide.addText(
+        bulletText.length > 0
+          ? bulletText
+          : [{ text: '', options: { fontSize: 28, color: 'FFFFFF' } }],
+        {
+          x: 1,
+          y: 2.3,
+          w: 8,
+          h: 4.5,
+          fontSize: 28,
+          color: 'FFFFFF',
+          valign: 'top',
+        }
+      );
+    });
+
+    // Blob으로 변환
+    return pres.write({ outputType: 'blob' }) as Blob;
+  };
+
+  // 마크다운을 슬라이드 배열로 파싱
+  const parseMarkdownToSlides = (markdown: string): any[] => {
+    const slides: any[] = [];
+    const slideTexts = markdown.split('---').map(s => s.trim()).filter(s => s);
+
+    slideTexts.forEach((slideText, idx) => {
+      const lines = slideText.split('\n').map(l => l.trim()).filter(l => l);
+
+      let title = '';
+      let content = '';
+      let bullets: string[] = [];
+      let visual: string | undefined;
+
+      for (const line of lines) {
+        if (line.startsWith('# 슬라이드')) {
+          // "# 슬라이드 1: 제목" 형식 파싱
+          title = line.replace(/^#+\s*슬라이드\s*\d+:\s*/, '');
+        } else if (line.startsWith('-')) {
+          bullets.push(line.replace(/^-\s*/, ''));
+        } else if (line.startsWith('[시각화:')) {
+          visual = line.replace(/^\[시각화:\s*/, '').replace(/\]$/, '');
+        } else if (!line.startsWith('*') && line) {
+          if (!content) {
+            content = line;
+          }
+        }
+      }
+
+      slides.push({
+        order: idx + 1,
+        title: title || `슬라이드 ${idx + 1}`,
+        content: content,
+        bullets: bullets.length > 0 ? bullets : [],
+        visual: visual
+      });
+    });
+
+    return slides;
+  };
+
+  // 마크다운 슬라이드를 HTML로 변환
+  const markdownToHTMLSlides = (markdown: string): string => {
+    const slides = markdown.split('---').map(s => s.trim()).filter(s => s);
+
+    const slideHtmls = slides.map((slide, idx) => {
+      const lines = slide.split('\n').map(l => l.trim()).filter(l => l);
+      let title = '';
+      let content = '';
+
+      // 첫 줄이 제목 (# 또는 ## 형식)
+      if (lines[0]?.startsWith('#')) {
+        title = lines[0].replace(/^#+\s*/, '');
+        content = lines.slice(1).join('');
+      } else {
+        content = lines.join('');
+      }
+
+      // 글릿 포인트 처리
+      const bulletPoints = content.match(/^[-•]\s+.+$/gm) || [];
+      const bulletHTML = bulletPoints.map(b => `<li>${b.replace(/^[-•]\s+/, '')}</li>`).join('');
+
+      return `
+        <div class="slide ${idx === 0 ? 'active' : ''}">
+          ${title ? `<h1>${title}</h1>` : ''}
+          ${bulletHTML ? `<ul>${bulletHTML}</ul>` : `<p>${content}</p>`}
+        </div>
+      `;
+    }).join('');
+
+    return `<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LARS 프레젠테이션</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; }
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #1a1a1a; }
+
+    .slides-container { width: 100%; height: 100%; position: relative; }
+
+    .slide {
+      display: none;
+      width: 100%;
+      height: 100%;
+      padding: 80px 100px;
+      position: absolute;
+      top: 0;
+      left: 0;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      flex-direction: column;
+      justify-content: center;
+      font-size: 28px;
+      line-height: 1.6;
+      overflow: auto;
+    }
+
+    .slide.active { display: flex; }
+
+    .slide:nth-child(2n) { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
+    .slide:nth-child(3n) { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
+    .slide:nth-child(4n) { background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); }
+    .slide:nth-child(5n) { background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); }
+
+    .slide h1 {
+      font-size: 64px;
+      margin-bottom: 60px;
+      font-weight: bold;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+    }
+
+    .slide ul {
+      list-style: none;
+      margin: 30px 0;
+    }
+
+    .slide li {
+      margin: 25px 0;
+      padding-left: 50px;
+      position: relative;
+      font-size: 32px;
+    }
+
+    .slide li:before {
+      content: "▸";
+      position: absolute;
+      left: 0;
+      font-size: 40px;
+    }
+
+    .slide p {
+      font-size: 32px;
+      line-height: 1.8;
+    }
+
+    .controls {
+      position: fixed;
+      bottom: 30px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 20px;
+      z-index: 1000;
+    }
+
+    .btn {
+      background: rgba(255,255,255,0.3);
+      color: white;
+      border: 2px solid white;
+      padding: 12px 24px;
+      font-size: 16px;
+      cursor: pointer;
+      border-radius: 8px;
+      transition: all 0.3s;
+      backdrop-filter: blur(10px);
+    }
+
+    .btn:hover {
+      background: rgba(255,255,255,0.5);
+      transform: scale(1.05);
+    }
+
+    .slide-counter {
+      position: fixed;
+      top: 30px;
+      right: 30px;
+      background: rgba(255,255,255,0.3);
+      color: white;
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-size: 18px;
+      backdrop-filter: blur(10px);
+      z-index: 1000;
+    }
+  </style>
+</head>
+<body>
+  <div class="slides-container">
+    ${slideHtmls}
+  </div>
+
+  <div class="slide-counter">
+    <span id="current">1</span> / <span id="total">${slides.length}</span>
+  </div>
+
+  <div class="controls">
+    <button class="btn" onclick="prevSlide()">← 이전</button>
+    <button class="btn" onclick="nextSlide()">다음 →</button>
+  </div>
+
+  <script>
+    let currentSlide = 0;
+    const totalSlides = document.querySelectorAll('.slide').length;
+    document.getElementById('total').textContent = totalSlides;
+
+    function showSlide(n) {
+      const slides = document.querySelectorAll('.slide');
+      if (n >= slides.length) currentSlide = 0;
+      if (n < 0) currentSlide = slides.length - 1;
+      slides.forEach(s => s.classList.remove('active'));
+      slides[currentSlide].classList.add('active');
+      document.getElementById('current').textContent = currentSlide + 1;
+    }
+
+    function nextSlide() {
+      currentSlide++;
+      showSlide(currentSlide);
+    }
+
+    function prevSlide() {
+      currentSlide--;
+      showSlide(currentSlide);
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight' || e.key === ' ') {
+        e.preventDefault();
+        nextSlide();
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        prevSlide();
+      }
+    });
+
+    showSlide(0);
+  </script>
+</body>
+</html>`;
+  };
+
+  const saveGeneratedContent = async (content: string, type: string, userMessage: string) => {
+    try {
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+      let fileName = '';
+      let fileExtension = '';
+      let finalContent = content;
+
+      switch (type) {
+        case 'document':
+          fileName = `문서_${timestamp}`;
+          fileExtension = '.md';
+          break;
+        case 'code':
+          fileName = `코드_${timestamp}`;
+          fileExtension = '.py'; // 기본값
+          // 언어 감지
+          if (userMessage.includes('javascript') || userMessage.includes('js')) fileExtension = '.js';
+          else if (userMessage.includes('html')) fileExtension = '.html';
+          else if (userMessage.includes('css')) fileExtension = '.css';
+          else if (userMessage.includes('typescript') || userMessage.includes('ts')) fileExtension = '.ts';
+          break;
+        case 'presentation':
+          // 프레젠테이션: HTML과 PPTX 둘 다 생성
+          fileName = `프레젠테이션_${timestamp}`;
+
+          // 사용자에게 포맷 선택 묻기
+          const formatChoice = confirm(
+            'PPTX 파일로 저장하시겠습니까?\n\n' +
+            '[확인] PPTX (PowerPoint)\n' +
+            '[취소] HTML (브라우저에서 보기)'
+          );
+
+          if (formatChoice) {
+            // PPTX 생성 및 다운로드
+            const pptxBlob = markdownToPPTX(content);
+            const url = URL.createObjectURL(pptxBlob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${fileName}.pptx`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            alert(`프레젠테이션이 다운로드되었습니다: ${fileName}.pptx`);
+            return;  // 파일 저장 함수 종료
+          } else {
+            // HTML 생성
+            fileExtension = '.html';
+            finalContent = markdownToHTMLSlides(content);
+          }
+          break;
+        case 'analysis':
+          fileName = `분석_${timestamp}`;
+          fileExtension = '.json';
+          break;
+        default:
+          return;
+      }
+
+      const fullFileName = `${fileName}${fileExtension}`;
+
+      // Tauri 파일 시스템 API로 저장
+      if (isTauri) {
+        try {
+          // 사용자가 저장 위치 선택
+          const selectedPath = await invoke<string | null>('save_file_dialog', {
+            suggestedName: fullFileName
+          });
+
+          if (selectedPath) {
+            // 선택된 위치에 파일 저장
+            await invoke('save_file_to_location', {
+              path: selectedPath,
+              content: finalContent
+            });
+            console.log(`[SAVED] ${selectedPath}`);
+            alert(`파일이 저장되었습니다:\n${selectedPath}`);
+          } else {
+            console.log('[INFO] 저장 위치 선택 취소됨');
+          }
+        } catch (e) {
+          console.error('[ERROR] 파일 저장 실패:', e);
+          // 폴백: 기본 위치에 저장
+          try {
+            const dirPath = `${process.env.HOME}/.lars/generated`;
+            await invoke('create_file', {
+              path: `${dirPath}/${fullFileName}`,
+              content: finalContent
+            });
+            console.log(`[SAVED] ${fullFileName} (기본 위치)`);
+          } catch (fallbackErr) {
+            console.error('[ERROR] 기본 위치에도 저장 실패:', fallbackErr);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('[ERROR] 파일 저장 실패:', error);
+    }
+  };
+
+  const handleSendMessage = async (text: string) => {
+    if (!text.trim()) return;
+    setInput(text);
+    // 짧은 딜레이 후 handleCommand 실행
+    setTimeout(() => {
+      handleCommand();
+    }, 100);
+  };
+
+  // 웹 검색 수행 헬퍼 함수
+  const performWebSearch = async (query: string): Promise<{ text: string; sources: any[] }> => {
+    try {
+      console.log('[WEB-SEARCH] 검색 시작:', query);
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+
+      const response = await fetch(`${apiUrl}/search/web?query=${encodeURIComponent(query)}&limit=5`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, limit: 5 })
+      });
+
+      if (!response.ok) {
+        console.warn('[WEB-SEARCH] 검색 실패:', response.status);
+        return { text: '', sources: [] };
+      }
+
+      const data = await response.json();
+
+      if (data.results && data.results.length > 0) {
+        // 검색 결과 필터링 - 관련성 낮은 결과 제거
+        const keywordTokens = query.toLowerCase().split(' ').filter(t => t.length > 2);
+        const filteredResults = data.results.filter((result: any) => {
+          const title = (result.title || '').toLowerCase();
+          const snippet = (result.snippet || '').toLowerCase();
+          // 최소 2개 이상의 키워드가 제목이나 요약에 포함되어야 함
+          const matchCount = keywordTokens.filter(k =>
+            title.includes(k) || snippet.includes(k)
+          ).length;
+          return matchCount >= Math.max(1, Math.floor(keywordTokens.length / 2));
+        });
+
+        if (filteredResults.length > 0) {
+          // 검색 결과를 프롬프트 형식으로 변환 (간결한 형식)
+          const searchContext = filteredResults.map((result: any, idx: number) =>
+            `${idx + 1}. ${result.title}\n   ${result.snippet}`
+          ).join('\n\n');
+
+          console.log('[WEB-SEARCH] ✅ 검색 완료:', filteredResults.length, '개 결과 (필터링 전:', data.results.length, ')');
+
+          // 출처 정보는 SourceCitations 컴포넌트에서 표시
+          return {
+            text: `\n\n[웹 검색 결과]\n${searchContext}`,
+            sources: filteredResults
+          };
+        } else {
+          console.log('[WEB-SEARCH] 관련 결과 없음 (필터링 후)');
+        }
+      }
+
+      console.log('[WEB-SEARCH] 검색 결과 없음');
+      return { text: '', sources: [] };
+    } catch (err) {
+      console.error('[WEB-SEARCH] 오류:', err);
+      return { text: '', sources: [] };
+    }
+  };
+
+  const handleCommand = async () => {
+    console.log('🔵 [DEBUG] handleCommand 호출됨');
+    console.log('🔵 [DEBUG] input:', input);
+    console.log('🔵 [DEBUG] attachedFiles:', attachedFiles.length);
+
+    if (!input.trim() && attachedFiles.length === 0) {
+      console.log('🔵 [DEBUG] 입력값 없음 - 함수 종료');
+      return;
+    }
+
+    console.log('🔵 [DEBUG] 입력값 확인됨 - 처리 시작');
+    setStatus('ANALYZING');
+    setResponse('');
+    setCurrentTokens({ input: 0, output: 0, total: 0 });
+    let fullContent = '';
+
+    try {
+      const userMessage = input.trim();
+      const fileContext = attachedFiles.map(f => `@${f.path}`).join(' ');
+      const fullPrompt = `${fileContext} ${userMessage}`.trim();
+
+      // 모델별 처리 로직
+      console.log(`🤖 [MODEL] 현재 모델: ${activeModel}`);
+
+      // LARS-Native: 빠른 코딩 & 고속 구현
+      const isNativeOptimized = activeModel === 'LARS-Native' &&
+        (userMessage.includes('코드') || userMessage.includes('함수') || userMessage.includes('버그'));
+
+      // LARS-Cosmos: 깊은 분석 & 아키텍처
+      const isCosmosAnalysis = activeModel === 'LARS-Cosmos' &&
+        (userMessage.includes('분석') || userMessage.includes('아키텍처') || userMessage.includes('설계'));
+
+      // LARS-Prime: 보안 & 논리 검증
+      const isPrimeSecure = activeModel === 'LARS-Prime' &&
+        (userMessage.includes('보안') || userMessage.includes('검증') || userMessage.includes('감사'));
+
+      // Aivora: 감정 AI 분석
+      const isAivoraEmotion = activeModel === 'Aivora' &&
+        (userMessage.includes('감정') || userMessage.includes('분석') || userMessage.includes('상담'));
+
+      // Rekora: 3D 설계 & 이미지 생성
+      const isRekoraDesign = activeModel === 'Rekora' &&
+        (userMessage.includes('이미지') || userMessage.includes('3D') || userMessage.includes('디자인'));
+
+      // Synzora: 데이터 그래프 & 네트워크
+      const isSynzoraGraph = activeModel === 'Synzora' &&
+        (userMessage.includes('그래프') || userMessage.includes('네트워크') || userMessage.includes('관계'));
+
+      // 모델 특화 정보 추가
+      let modelContext = '';
+      if (isNativeOptimized) {
+        modelContext = '\n[모델 모드: LARS-Native]\n⚡ 고속 실행 모드 활성화 - 코딩 최적화됨';
+      } else if (isCosmosAnalysis) {
+        modelContext = '\n[모델 모드: LARS-Cosmos]\n🌌 깊은 분석 모드 - 맥락 강화됨';
+      } else if (isPrimeSecure) {
+        modelContext = '\n[모델 모드: LARS-Prime]\n🔒 보안 검증 모드 - 무결점 추론';
+      } else if (isAivoraEmotion) {
+        modelContext = '\n[모델 모드: Aivora]\n❤️ 감정 AI 모드 - 정서 지능 활성화';
+      } else if (isRekoraDesign) {
+        modelContext = '\n[모델 모드: Rekora]\n🎨 3D 설계 모드 - 비주얼 생성 준비';
+      } else if (isSynzoraGraph) {
+        modelContext = '\n[모델 모드: Synzora]\n📊 그래프 분석 모드 - 네트워크 시각화';
+      }
+
+      // 🎁 프레젠테이션 요청 감지 (직접 처리)
+      const isPresentationRequest = userMessage.includes('프레젠테이션') ||
+                                    userMessage.includes('프리젠테이션') ||
+                                    userMessage.includes('발표') ||
+                                    userMessage.includes('슬라이드') ||
+                                    userMessage.includes('프레젠');
+
+      console.log(`[PRESENTATION] 메시지: "${userMessage}"`);
+      console.log(`[PRESENTATION] 감지 여부: ${isPresentationRequest}`);
+
+      if (isPresentationRequest) {
+        console.log(`[PRESENTATION] 🎬 프레젠테이션 생성 요청 감지!`);
+
+        try {
+          setResponse(`⏳ 프레젠테이션 생성 중...\n\n이 과정은 약 30초 소요됩니다.`);
+
+          // 첨부된 파일 내용 읽기
+          let fileContent = '';
+          if (attachedFiles.length > 0) {
+            console.log(`[PRESENTATION] 📎 첨부 파일 ${attachedFiles.length}개 발견`);
+            for (const file of attachedFiles) {
+              try {
+                const result = await invoke<string>('execute_terminal_command', { command: `cat "${file.path}"` });
+                fileContent += `\n\n=== ${file.name} ===\n${result}`;
+              } catch (err) {
+                console.warn(`[PRESENTATION] 파일 읽기 실패: ${file.name}`, err);
+              }
+            }
+          }
+
+          // 직접 프레젠테이션 API 호출
+          const presResponse = await fetch('http://127.0.0.1:8000/api/presentation/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              topic: userMessage,
+              audience: 'investor',
+              num_slides: 10,
+              file_content: fileContent,
+              use_file_context: fileContent.length > 0
+            }),
+            timeout: 120000
+          });
+
+          if (presResponse.ok) {
+            const presResult = await presResponse.json();
+
+            if (presResult.success && presResult.pptx_base64) {
+              console.log(`[PRESENTATION] ✅ PPTX 생성 완료!`);
+              console.log(`[PRESENTATION] 슬라이드: ${presResult.slides_count}개`);
+
+              // Base64 → Blob 변환 (비동기로 처리)
+              setResponse(`📥 파일 준비 중...\n\n📊 ${presResult.slides_count}개 슬라이드`);
+
+              // 비동기로 처리해서 UI 업데이트
+              setTimeout(() => {
+                try {
+                  // 더 효율적인 방식: Uint8Array 직접 사용
+                  const binaryString = atob(presResult.pptx_base64);
+                  const len = binaryString.length;
+                  const bytes = new Uint8Array(len);
+
+                  for (let i = 0; i < len; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                  }
+
+                  const pptxBlob = new Blob([bytes], {
+                    type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+                  });
+
+                  const url = URL.createObjectURL(pptxBlob);
+                  const downloadLink = document.createElement('a');
+                  downloadLink.href = url;
+                  downloadLink.download = presResult.filename || `presentation_${Date.now()}.pptx`;
+                  document.body.appendChild(downloadLink);
+                  downloadLink.click();
+                  document.body.removeChild(downloadLink);
+                  URL.revokeObjectURL(url);
+
+                  setResponse(`✅ 완료!\n\n📊 ${presResult.slides_count}개 슬라이드\n📁 파일이 다운로드되었습니다\n\n회의/미팅에서 바로 사용할 수 있습니다!`);
+                  setGenerationType('presentation');
+                  setStatus('IDLE');
+                  setInput('');
+                } catch (downloadErr) {
+                  console.error('[PRESENTATION] 다운로드 에러:', downloadErr);
+                  setResponse(`❌ 다운로드 실패: ${(downloadErr as any).message}`);
+                  setStatus('IDLE');
+                }
+              }, 100);
+            }
+          }
+
+          setResponse('❌ 프레젠테이션 생성 실패');
+          setStatus('IDLE');
+          return;
+
+        } catch (presErr) {
+          console.error('[PRESENTATION] 에러:', presErr);
+          setResponse(`❌ 프레젠테이션 생성 실패: ${(presErr as any).message}`);
+          setStatus('IDLE');
+          return;
+        }
+      }
+
+      // 🎯 간단한 방식: 직접 AI 에이전트 호출 (파일 생성 안 함)
+      console.log(`[CHAT] 💬 사용자 메시지: "${userMessage}"`);
+      console.log(`[CHAT] 생성 모드: ${generationMode}`);
+
+      try {
+        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+
+        if (generationMode === 'workspace') {
+          // Workspace 모드: 단계별 처리
+          console.log('[WORKSPACE] 🚀 Workspace 모드로 처리 시작');
+          setResponse('');
+
+          const steps = [
+            { step: 1, name: language === 'ko' ? '분석' : 'Analyze', status: 'processing', agents: [] },
+            { step: 2, name: language === 'ko' ? '계획' : 'Plan', status: 'pending', agents: [] },
+            { step: 3, name: language === 'ko' ? '실행' : 'Execute', status: 'pending', agents: [] },
+            { step: 4, name: language === 'ko' ? '통합' : 'Integrate', status: 'pending', agents: [] }
+          ];
+
+          setWorkspaceSteps(steps);
+
+          // 단계 1: 분석
+          setTimeout(() => {
+            setWorkspaceSteps((prevSteps) => {
+              const now = Date.now();
+              const updatedSteps = JSON.parse(JSON.stringify(prevSteps));
+              updatedSteps[0].status = 'completed';
+              updatedSteps[0].agents = [
+                { name: 'Context Analyzer', status: 'completed', result: `사용자 입력 분석 완료: "${userMessage.substring(0, 50)}..."` }
+              ];
+              updatedSteps[0].agentMessages = [
+                { agent: 'Context Analyzer', message: '사용자 질문 수신 및 초기 분석 시작...', timestamp: now },
+                { agent: 'Context Analyzer', message: `질문 주제 분석: ${userMessage.substring(0, 40)}...`, timestamp: now + 100 },
+                { agent: 'Context Analyzer', message: '핵심 키워드 추출 및 컨텍스트 파악 완료', timestamp: now + 200 }
+              ];
+              updatedSteps[1].status = 'processing';
+              return updatedSteps;
+            });
+          }, 500);
+
+          // 단계 2: 계획
+          setTimeout(() => {
+            setWorkspaceSteps((prevSteps) => {
+              const now = Date.now();
+              const updatedSteps = JSON.parse(JSON.stringify(prevSteps));
+              updatedSteps[0].status = 'completed';
+              updatedSteps[1].status = 'completed';
+              updatedSteps[1].agents = [
+                { name: 'Orchestrator', status: 'completed', result: '다중 에이전트 워크플로우 수립 완료' },
+                { name: 'Task Planner', status: 'completed', result: '4개 에이전트 병렬 작동 계획됨' }
+              ];
+              updatedSteps[1].agentMessages = [
+                { agent: 'Orchestrator', message: '분석 결과 수신 및 전략 수립 시작', timestamp: now },
+                { agent: 'Task Planner', message: '작업 분해 및 병렬 처리 최적화 중...', timestamp: now + 150 },
+                { agent: 'Orchestrator', message: '4개 에이전트 역할 할당 완료', timestamp: now + 300 },
+                { agent: 'Task Planner', message: '워크플로우 의존성 분석 및 일정 수립 완료', timestamp: now + 450 }
+              ];
+              updatedSteps[2].status = 'processing';
+              return updatedSteps;
+            });
+          }, 1500);
+
+          // Phase 3: 워크플로우 체크포인트 (단계 2-3 사이)
+          setTimeout(() => {
+            setWorkspaceSteps((prevSteps) => {
+              const now2_5 = Date.now();
+              const updatedSteps = JSON.parse(JSON.stringify(prevSteps));
+
+              // Decision Checkpoint: 실행 경로 선택
+              updatedSteps[1].checkpoints = [
+                {
+                  id: 'checkpoint-path-selection',
+                  stepNumber: 2,
+                  type: 'decision',
+                  title: '실행 경로 선택',
+                  description: '다음 실행 방식을 선택하세요',
+                  message: '계획이 완료되었습니다. 어떤 방식으로 실행할지 선택해주세요.',
+                  status: 'pending',
+                  userApprovalRequired: true,
+                  timestamp: now2_5,
+                  options: [
+                    {
+                      id: 'path-conservative',
+                      label: '보수적 경로',
+                      description: '안전성을 우선시, 느리지만 신뢰성 높음',
+                      estimatedTime: 2,
+                      estimatedCost: 5,
+                      quality: 85,
+                      risk: 10,
+                      agents: ['validator', 'formatter'],
+                      config: { safety: true, thoroughness: 'high' }
+                    },
+                    {
+                      id: 'path-standard',
+                      label: '표준 경로',
+                      description: '균형잡힌 접근, 시간과 품질 모두 고려',
+                      estimatedTime: 5,
+                      estimatedCost: 7,
+                      quality: 92,
+                      risk: 25,
+                      agents: ['executor', 'validator', 'formatter'],
+                      config: { safety: 'medium', thoroughness: 'standard' }
+                    },
+                    {
+                      id: 'path-aggressive',
+                      label: '혁신적 경로',
+                      description: '속도 우선, 더 나은 결과를 위한 실험적 접근',
+                      estimatedTime: 10,
+                      estimatedCost: 9,
+                      quality: 98,
+                      risk: 45,
+                      agents: ['executor', 'analyzer'],
+                      config: { safety: false, thoroughness: 'experimental' }
+                    }
+                  ]
+                }
+              ];
+
+              return updatedSteps;
+            });
+          }, 1950);
+
+          // Phase 4: Multi-Agent Orchestration 실행 (단계 2-3 사이)
+          setTimeout(async () => {
+            try {
+              // 에이전트 풀 생성 및 초기화
+              const poolConfig: AgentPoolConfig = {
+                maxAgents: 4,
+                autoScale: false,
+                specializations: ['데이터분석', '추론', '검증', '포맷팅'],
+                taskTimeout: 10000,
+                retryPolicy: { maxRetries: 2, delayMs: 500 },
+                loadBalancing: 'round-robin'
+              };
+
+              // const poolManager = new AgentPoolManager(poolConfig);
+              // poolManager.setStateChangeCallback((state) => {
+              //   setAgentPoolState(state);
+              // });
+
+              // 병렬 에이전트 생성
+              const agents = [
+                poolManager.createSpecializedAgent('Data Analyzer', '데이터분석', [
+                  'analyze_data',
+                  'read_file'
+                ]),
+                poolManager.createSpecializedAgent('AI Inference', '추론', [
+                  'generate_report',
+                  'execute_analysis'
+                ]),
+                poolManager.createSpecializedAgent('Validator', '검증', [
+                  'validate_output'
+                ]),
+                poolManager.createSpecializedAgent('Formatter', '포맷팅', [
+                  'format_document'
+                ])
+              ];
+
+              console.log(`[AGENT_POOL] 🚀 ${agents.length}개 에이전트 생성 완료`);
+              setAgentPoolState(poolManager.getPoolState());
+
+              // 병렬 작업 배치 생성
+              const tasks: AgentTask[] = [
+                {
+                  id: 'task-1',
+                  agent: 'analyzer',
+                  taskType: 'analyze_data',
+                  input: { data: userMessage.substring(0, 100) },
+                  status: 'pending',
+                  timestamp: Date.now()
+                },
+                {
+                  id: 'task-2',
+                  agent: 'executor',
+                  taskType: 'generate_report',
+                  input: { data: userMessage },
+                  status: 'pending',
+                  timestamp: Date.now()
+                },
+                {
+                  id: 'task-3',
+                  agent: 'validator',
+                  taskType: 'validate_output',
+                  input: { schema: { success: 'boolean', content: 'string' } },
+                  status: 'pending',
+                  timestamp: Date.now()
+                },
+                {
+                  id: 'task-4',
+                  agent: 'formatter',
+                  taskType: 'format_document',
+                  input: { content: 'formatted output', format: 'markdown' },
+                  status: 'pending',
+                  timestamp: Date.now()
+                }
+              ];
+
+              const batch = poolManager.createParallelBatch(tasks);
+              console.log(`[AGENT_POOL] 📦 배치 #${batch.batchNumber} 생성 (${tasks.length}개 작업)`);
+
+              // 병렬 배치 실행
+              await poolManager.executeBatch(batch, (log) => {
+                console.log('[BATCH_EXECUTION]', log);
+              });
+
+              const finalState = poolManager.getPoolState();
+              setAgentPoolState(finalState);
+              console.log(
+                `[AGENT_POOL] ✅ 배치 실행 완료 - 성공: ${batch.successCount}, 실패: ${batch.failureCount}`
+              );
+            } catch (error) {
+              console.error('[AGENT_POOL] ❌ 에이전트 풀 실행 오류:', error);
+            }
+          }, 1800);
+
+          // 단계 3: 실행 - API 호출 (경로 선택 후)
+          setTimeout(async () => {
+            try {
+              const fullApiUrl = `${apiUrl}/agent/query`;
+
+              // 웹 검색 수행
+              const searchResult = await performWebSearch(userMessage);
+              setSearchSources(searchResult.sources);
+
+              // LARS Agent 수준의 고급 프롬프트 (웹 검색 결과 + 모델 특화 지시사항 포함)
+              const modelSpecificInstructions = (() => {
+                switch (activeModel) {
+                  case 'LARS-Native':
+                    return `[모델 최적화: LARS-Native - 고속 실행]
+                    - 코드 기반 작업 우선
+                    - 간결하고 효율적인 솔루션 제시
+                    - 성능 최적화 중심
+                    - 직접 실행 가능한 코드 제공`;
+                  case 'LARS-Cosmos':
+                    return `[모델 최적화: LARS-Cosmos - 깊은 분석]
+                    - 복잡한 맥락과 연결고리 고려
+                    - 전체적인 아키텍처 관점 제시
+                    - 장기적 영향 분석
+                    - 다양한 관점 포함`;
+                  case 'LARS-Prime':
+                    return `[모델 최적화: LARS-Prime - 보안 & 검증]
+                    - 보안 취약점 검토
+                    - 논리적 결함 지적
+                    - 코드 감사 수행
+                    - 잠재적 위험 사항 강조`;
+                  case 'Aivora':
+                    return `[모델 최적화: Aivora - 감정 AI]
+                    - 사람의 감정과 심리 분석
+                    - 공감적 응답 제공
+                    - 감정적 뉘앙스 고려
+                    - 심리 상담 관점 포함`;
+                  case 'Rekora':
+                    return `[모델 최적화: Rekora - 3D 설계]
+                    - 시각적 설명 우선
+                    - 비주얼 표현 제시
+                    - 3D 개념 설명
+                    - 디자인 미학 고려`;
+                  case 'Synzora':
+                    return `[모델 최적화: Synzora - 그래프 분석]
+                    - 관계와 네트워크 분석
+                    - 데이터 연결고리 시각화
+                    - 그래프 구조 제시
+                    - 패턴 인식 강조`;
+                  case 'Luminaic':
+                    return `[모델 최적화: Luminaic - 대규모 분석]
+                    - 데이터 기반 분석
+                    - 통계적 근거 제시
+                    - 대규모 데이터 처리
+                    - 정량적 결과 강조`;
+                  default:
+                    return '';
+                }
+              })();
+
+              const enhancedQuery = `[LARS WORKSPACE PROTOCOL - 정확성 강화]
+
+당신은 LARS Intelligence Platform의 Workspace 모드 에이전트입니다.
+목표: 웹 검색 결과와 고급 추론을 통해 정확하고 신뢰할 수 있는 답변 제공
+
+${modelSpecificInstructions}
+
+[PHASE 1: 질문 분석]
+사용자의 질문을 다음 기준으로 분석하세요:
+- 핵심 주제: 무엇을 묻고 있는가?
+- 정보 타입: 설명/예시/비교/분석/방법 중 어떤 것?
+- 시간적 맥락: 최신 정보가 필요한가?
+
+[PHASE 2: 웹 검색 결과 활용 (필수)]
+아래 웹 검색 결과를 최우선으로 사용하여 답변하세요.
+검색 결과는 가장 신뢰할 수 있는 정보원입니다:
+${searchResult.text || '(검색 결과 없음)'}
+
+⚠️ 중요: 검색 결과의 정보를 먼저 사용하고, 자신의 지식은 보충으로만 사용하세요.
+
+[PHASE 3: 답변 구성 (Chain of Thought)]
+1. 질문의 핵심을 명확히 파악하기
+2. 웹 검색 결과에서 관련 정보 추출하기
+3. 정확한 설명과 함께 답변 구성하기
+4. 필요시 구체적 예시나 응용 방법 제시하기
+5. 신뢰도 평가 및 보충 설명하기
+
+[QUALITY STANDARDS]
+✓ 정확성: 질문과 100% 관련된 내용만
+✓ 완전성: 필요한 모든 정보 포함
+✓ 최신성: 웹 검색 결과 기반 최신 정보
+✓ 명확성: 구조화되고 이해하기 쉬운 답변
+✓ 신뢰성: 불확실한 부분은 명시
+
+[CRITICAL RULES]
+- 사용자의 질문에 정확히 답변하세요
+- 질문과 무관한 내용은 절대 포함하지 마세요
+- 엉뚱한 주제로 벗어나면 안 됩니다
+- 모르는 정보는 명확히 "정확한 정보를 알 수 없습니다" 표시
+- 사용자 질문 언어로 답변 (한국어 질문 → 한국어 답변)
+
+[RESPONSE FORMAT]
+1. **직접 답변**: 질문에 정확하게 답하는 부분 (1-2문장)
+2. **상세 설명**: 이해를 돕는 배경 및 설명
+3. **웹 검색 기반**: 최신 정보 및 구체적 예시
+4. **추가 정보**: 관련된 유용한 보충 정보 (필요시)
+
+---
+
+[사용자 질문]
+"${userMessage}"
+
+위의 LARS WORKSPACE PROTOCOL을 따라 정확하고 신뢰할 수 있는 답변을 제공하세요.`;
+
+              // Workspace 모드에서도 Prism Query API 사용
+              const prismApiUrl = `${apiUrl}/agent/prism/query`;
+
+              const agentResponse = await fetch(prismApiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  query: enhancedQuery,
+                  user_id: userId,
+                  model: getOllamaModelName(activeModel),
+                  use_cache: true
+                })
+              });
+
+              if (!agentResponse.ok) {
+                const errorText = await agentResponse.text();
+                fullContent = `❌ 오류: ${errorText}`;
+              } else {
+                const result = await agentResponse.json();
+                const agentResponse_text = result.response || '응답을 생성하지 못했습니다.';
+
+                // 모델 정보와 응답 결합
+                if (modelContext) {
+                  fullContent = `${modelContext}\n\n---\n\n${agentResponse_text}`;
+                } else {
+                  fullContent = agentResponse_text;
+                }
+              }
+
+              // 단계 3: 에이전트 작업 실행
+              const now3 = Date.now();
+
+              // 에이전트 작업 시뮬레이션 (Phase 1.1 구현)
+              const actionLogs: any[] = [
+                {
+                  agent: 'Data Processor',
+                  action: 'analyze_data',
+                  description: '사용자 질문 데이터 분석 중...',
+                  status: 'completed',
+                  input: { data: userMessage.substring(0, 50) },
+                  output: { count: 1, analyzed: true },
+                  timestamp: now3,
+                  duration: 120
+                },
+                {
+                  agent: 'AI Inference',
+                  action: 'generate_report',
+                  description: 'AI 모델 추론 및 응답 생성 중...',
+                  status: 'completed',
+                  input: { data: userMessage },
+                  output: {
+                    summary: `"${userMessage.substring(0, 40)}"에 대한 종합 분석`,
+                    confidence: 95.2
+                  },
+                  timestamp: now3 + 300,
+                  duration: 450
+                },
+                {
+                  agent: 'Validator',
+                  action: 'validate_output',
+                  description: '결과 검증 및 품질 확인 중...',
+                  status: 'completed',
+                  input: { schema: { success: 'boolean', content: 'string' } },
+                  output: { isValid: true, errors: [] },
+                  timestamp: now3 + 800,
+                  duration: 150
+                },
+                {
+                  agent: 'Formatter',
+                  action: 'format_document',
+                  description: '최종 출력 형식화 중...',
+                  status: 'completed',
+                  input: { format: 'markdown' },
+                  output: { formatted: true, lines: 12 },
+                  timestamp: now3 + 1100,
+                  duration: 80
+                }
+              ];
+
+              // 생성된 산출물
+              const artifacts: any[] = [
+                {
+                  id: 'analysis-' + Date.now(),
+                  name: '질문 분석 결과',
+                  type: 'analysis',
+                  path: '.lars/output/analysis.json',
+                  createdBy: 'Data Processor',
+                  createdAt: now3,
+                  preview: `질문: "${userMessage.substring(0, 50)}..."`
+                },
+                {
+                  id: 'report-' + Date.now(),
+                  name: 'AI 분석 리포트',
+                  type: 'report',
+                  path: '.lars/output/report.md',
+                  createdBy: 'AI Inference',
+                  createdAt: now3 + 300,
+                  preview: '종합 분석 및 인사이트 포함'
+                }
+              ];
+
+              setWorkspaceSteps((prevSteps) => {
+                const updatedSteps = JSON.parse(JSON.stringify(prevSteps));
+                updatedSteps[2].status = 'completed';
+                updatedSteps[2].agents = [
+                  { name: 'Data Processor', status: 'completed', result: '데이터 분석 및 처리 완료' },
+                  { name: 'AI Inference', status: 'completed', result: 'AI 모델 추론 완료' },
+                  { name: 'Validator', status: 'completed', result: '결과 검증 완료' },
+                  { name: 'Formatter', status: 'completed', result: '출력 형식화 완료' }
+                ];
+                updatedSteps[2].agentMessages = [
+                  { agent: 'Data Processor', message: '데이터 전처리 및 특성 추출 시작', timestamp: now3 },
+                  { agent: 'AI Inference', message: '언어 모델 추론 실행 중...', timestamp: now3 + 200 },
+                  { agent: 'Data Processor', message: '데이터 정제 및 통합 작업 진행 중', timestamp: now3 + 400 },
+                  { agent: 'Validator', message: '모델 출력 검증 및 신뢰도 평가 중', timestamp: now3 + 800 },
+                  { agent: 'AI Inference', message: '추론 완료 - 신뢰도 95.2%', timestamp: now3 + 1000 },
+                  { agent: 'Formatter', message: '결과를 사용자 친화적 형식으로 변환 중', timestamp: now3 + 1200 },
+                  { agent: 'Validator', message: '최종 검증 완료 - 모든 기준 충족', timestamp: now3 + 1400 }
+                ];
+                // Phase 1.1: 에이전트 작업 로그 추가
+                updatedSteps[2].actionLogs = actionLogs;
+                updatedSteps[2].artifacts = artifacts;
+                updatedSteps[3].status = 'processing';
+                return updatedSteps;
+              });
+
+              // 단계 4: 통합
+              setTimeout(() => {
+                setWorkspaceSteps((prevSteps) => {
+                  const now4 = Date.now();
+                  const finalSteps = JSON.parse(JSON.stringify(prevSteps));
+                  finalSteps[3].status = 'completed';
+                  finalSteps[3].agents = [
+                    { name: 'Result Integrator', status: 'completed', result: '모든 결과 통합 및 최적화 완료' }
+                  ];
+                  finalSteps[3].agentMessages = [
+                    { agent: 'Result Integrator', message: '실행 단계 결과 수집 및 통합 시작', timestamp: now4 },
+                    { agent: 'Result Integrator', message: '다중 에이전트 출력 결합 및 일관성 검증 중', timestamp: now4 + 200 },
+                    { agent: 'Result Integrator', message: '최종 답변 구성 및 품질 확인 중', timestamp: now4 + 400 },
+                    { agent: 'Result Integrator', message: '메타데이터 추가 및 출력 최적화 완료', timestamp: now4 + 600 }
+                  ];
+
+                  // Phase 3: 최종 확인 체크포인트
+                  finalSteps[3].checkpoints = [
+                    {
+                      id: 'checkpoint-final-approval',
+                      stepNumber: 4,
+                      type: 'review',
+                      title: '최종 결과 검토',
+                      description: '워크플로우 완료, 최종 결과 확인',
+                      message: '모든 처리가 완료되었습니다. 최종 결과를 검토하고 승인해주세요.',
+                      status: 'pending',
+                      userApprovalRequired: true,
+                      timestamp: now4
+                    }
+                  ];
+
+                  return finalSteps;
+                });
+
+                // 체크포인트 처리 후 응답 표시 (사용자 개입이 필요하지 않으면)
+                setTimeout(() => {
+                  setResponse(fullContent);
+                }, 500);
+              }, 1000);
+            } catch (err) {
+              console.error('[WORKSPACE] 실행 단계 오류:', err);
+              fullContent = `❌ 오류: ${(err as any).message}`;
+              setResponse(fullContent);
+            }
+          }, 2500);
+        } else {
+          // 일반 모드: Prism 3계층 아키텍처 사용
+          const fullApiUrl = `${apiUrl}/agent/prism/query`;
+          console.log(`[CHAT] 📡 Prism Query API 호출 중: ${fullApiUrl}`);
+          console.log(`[CHAT] 사용자 ID: ${userId}`);
+
+          // 웹 검색 수행
+          const searchResult = await performWebSearch(userMessage);
+          setSearchSources(searchResult.sources);
+
+          // LARS Agent 수준의 고급 프롬프트 (웹 검색 결과 포함)
+          const hasSearchResults = searchResult.text && searchResult.text.trim().length > 0;
+
+          const enhancedQuery = `[LARS CHAT PROTOCOL v2.1 - 극도의 정확성]
+
+당신은 LARS Intelligence Platform의 Chat 모드 에이전트입니다.
+정확성과 신뢰성이 무엇보다 중요합니다.
+
+[STEP 1: 질문 해석]
+사용자의 질문을 정확히 분석하세요:
+- 질문이 명확하고 이해 가능한가?
+- 모호한 부분이 있는가? (있으면 명시하고 해석 과정 설명)
+- 질문에 오타나 오해의 소지가 있는가?
+
+[STEP 2: 정보 수집]
+${hasSearchResults ?
+`웹 검색 결과를 활용합니다:
+${searchResult.text}
+
+📌 검색 결과 기반 원칙:
+- 검색 결과와 정확히 일치하는 부분만 답변
+- 검색 결과에 없는 내용은 절대 추가하지 말 것
+- 불확실한 부분은 "검색 결과에 따르면" 명시` :
+`검색 결과가 없으므로 신중하게 답변하세요:
+- 질문이 명확하지 않으면: "이 질문은 [이유]로 해석하기 어렵습니다"라고 설명
+- 정보가 없으면: "죄송하지만, 이 주제에 대한 정보를 찾을 수 없습니다" 명시
+- 일반적인 지식: "일반적으로 알려진 바에 따르면..."로 시작`}
+
+[STEP 3: 답변 생성]
+다음 규칙을 엄격히 따르세요:
+✓ 문법 검증: 한국어 문장이 완전하고 자연스러운가?
+✓ 논리 검증: 앞뒤가 일치하는가?
+✓ 정보 검증: 근거가 있는 정보인가?
+✓ 표현 검증: 명확하고 이해하기 쉬운가?
+
+[CRITICAL VALIDATION]
+응답하기 전에 반드시 확인하세요:
+❌ 절대 금지:
+  - 불완전한 문장 (예: "이것은 [불완전")
+  - 이상한 문자나 토큰 ([K], [UNK] 등)
+  - 문법적으로 틀린 한국어
+  - 검색 결과와 모순되는 내용
+  - 추측이나 추가 정보 (검색 결과 없을 때)
+
+✅ 반드시 포함:
+  - 명확한 주제 문장
+  - 완전한 한국어 문장들
+  - 검색 근거 (검색 결과 사용 시)
+  - 정보 없음 명시 (알 수 없을 때)
+
+[RESPONSE STRUCTURE]
+📝 핵심 답변 (1-3문장)
+- 직접적이고 명확함
+- 완전한 한국어 문장
+
+📌 설명 (필요시만)
+- 맥락 또는 배경 설명
+- 관련 세부사항
+
+🔗 출처 (검색 사용 시)
+- 검색 결과 출처 명시
+
+⚠️ 주의 사항 (필요시)
+- "정보를 찾을 수 없습니다" (미리 명시)
+- "해석의 어려움" (모호할 때 명시)
+
+---
+
+[사용자 질문]
+"${userMessage}"
+
+상기 규칙을 모두 따르면서 명확하고 정확한 한국어로 답변하세요.
+불확실하면 즉시 "정보를 찾을 수 없습니다"라고 말씀하세요.`;
+
+          // LARS AI 모델 API 호출
+          const larsApiUrl = `${apiUrl}/agent/chat`;
+          console.log(`[CHAT] 🤖 LARS AI 모델 호출 중: ${activeModel}`);
+          console.log(`[CHAT] 엔드포인트: ${larsApiUrl}`);
+
+          const agentResponse = await fetch(larsApiUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json'
+            },
+            body: JSON.stringify({
+              query: userMessage,
+              enhanced_query: enhancedQuery,
+              user_id: userId,
+              model: activeModel,
+              include_search: true,
+              search_results: searchResult.text ? true : false
+            })
+          });
+
+          console.log(`[CHAT] LARS API 응답 상태: ${agentResponse.status}`);
+
+          if (agentResponse.ok) {
+            const result = await agentResponse.json();
+            console.log('[CHAT] ✅ LARS AI 응답 수신!');
+            console.log('[CHAT] 응답:', result.response?.substring(0, 100) || result.result?.substring(0, 100));
+
+            // 응답 형식 처리 (여러 가지 가능성 지원)
+            fullContent = result.response || result.result || result.answer || result.message || '응답을 생성하지 못했습니다.';
+          } else {
+            const errorText = await agentResponse.text();
+            console.error('[CHAT] ❌ LARS API 오류:', agentResponse.status, errorText);
+
+            // 폴백: 간단한 응답 생성
+            fullContent = `⚠️ AI 모델이 응답을 생성하지 못했습니다.\n\n에러: ${agentResponse.status}\n\n💡 확인 사항:\n1. 백엔드 서버 실행 상태 확인\n2. 포트 8000에서 실행 중인지 확인\n3. LARS AI 모델이 로드되었는지 확인`;
+          }
+        }
+      } catch (err) {
+        console.error('[CHAT] 실패:', err);
+        fullContent = `❌ 오류: ${(err as any).message}`;
+      }
+
+      // 응답 표시
+      console.log(`[CHAT] 📝 응답 표시: ${fullContent.substring(0, 50)}...`);
+      setResponse(fullContent);
+      setGenerationType('chat');
+
+      // 채팅 히스토리에 저장
+      if (currentChat) {
+        // 기존 대화에 메시지 추가 (같은 세션 계속)
+        const updatedMessages = [
+          ...currentChat.messages,
+          { role: 'user', content: userMessage },
+          { role: 'assistant', content: fullContent }
+        ];
+        const updatedChat: ChatItem = {
+          ...currentChat,
+          response: fullContent,
+          messages: updatedMessages
+        };
+
+        // chatHistory에서 해당 채팅 업데이트
+        const updatedHistory = chatHistory.map(chat =>
+          chat.id === currentChat.id ? updatedChat : chat
+        );
+
+        setChatHistory(updatedHistory);
+        localStorage.setItem('lars_chat_history', JSON.stringify(updatedHistory));
+        setCurrentChat(updatedChat);
+      } else {
+        // 새로운 대화 시작
+        const newChat: ChatItem = {
+          id: Date.now().toString(),
+          title: userMessage.substring(0, 50) || '대화',
+          date: new Date().toLocaleDateString('ko-KR'),
+          input: userMessage,
+          response: fullContent,
+          messages: [
+            { role: 'user', content: userMessage },
+            { role: 'assistant', content: fullContent }
+          ]
+        };
+        const newHistory = [newChat, ...chatHistory];
+        setChatHistory(newHistory);
+        localStorage.setItem('lars_chat_history', JSON.stringify(newHistory));
+
+        // ✅ 새 대화를 현재 화면에 즉시 표시
+        setCurrentChat(newChat);
+      }
+
+      // UI 초기화
+      setInput('');
+      setStatus('SUCCESS');
+
+      // 음성 출력 모드에서는 응답을 음성으로 재생
+      if (voiceMode === 'output') {
+        setTimeout(() => { textToSpeech(fullContent); }, 500);
+      }
+    } catch (err) {
+      console.error('[HANDLER] 예상치 못한 에러:', err);
+      setResponse(`❌ 오류: ${(err as any).message}`);
+      setStatus('IDLE');
+    }
+  };
+
+  const handleApplyPatch = async (patchContent: string) => {
+    try {
+      const resultLines = await invoke<string[]>('apply_patch', { responseText: patchContent });
+      alert(resultLines.join('\n'));
+    } catch (err) { alert(`오류: ${err}`); }
+  };
+
+  const handleAppControl = async (script: string) => {
+    try {
+      const res = await invoke<string>('execute_terminal_command', { 
+        command: `osascript -e "${script.replace(/"/g, '\\"').replace(/\$/g, '\\$')}"` 
+      });
+      alert(`실행 결과:\n${res || '명령이 완료되었습니다.'}`);
+    } catch (err) { alert(`제어 실패: ${err}`); }
+  };
+
+  useEffect(() => {
+    const unlisteners: (() => void)[] = [];
+
+    const setupListeners = async () => {
+      // Agent Executor 초기화
+      try {
+        // await initAgentExecutor(invoke);
+        console.log('[AGENT] ✅ Agent Executor initialized');
+      } catch (e) {
+        console.warn('[AGENT] Agent Executor initialization failed:', e);
+      }
+
+      // Phase 4: Agent Pool Manager 초기화
+      try {
+        const poolConfig: AgentPoolConfig = {
+          maxAgents: 50,
+          autoScale: true,
+          specializations: ['데이터분석', '문서작성', '코드리뷰', '테스트'],
+          taskTimeout: 30000,
+          retryPolicy: { maxRetries: 3, delayMs: 1000 },
+          loadBalancing: 'least-loaded'
+        };
+        // const poolManager = new AgentPoolManager(poolConfig);
+        // poolManager.setStateChangeCallback((state) => {
+        //   setAgentPoolState(state);
+        //   console.log('[AGENT_POOL]', state);
+        // });
+        console.log('[AGENT_POOL] ✅ Agent Pool Manager initialized');
+      } catch (e) {
+        console.warn('[AGENT_POOL] Agent Pool Manager initialization failed:', e);
+      }
+
+      try {
+        unlisteners.push(await listen('menu-settings', () => setActiveTab('settings')));
+      } catch (e) {
+        console.warn('menu-settings listener not available');
+      }
+
+      try {
+        unlisteners.push(await listen('menu-about', () => setShowAboutModal(true)));
+      } catch (e) {
+        console.warn('menu-about listener not available');
+      }
+
+      try {
+        unlisteners.push(await listen('menu-toggle-sidebar', () => setSidebarCollapsed(prev => !prev)));
+      } catch (e) {
+        console.warn('menu-toggle-sidebar listener not available');
+      }
+
+      try {
+        unlisteners.push(await listen('menu-show-logs', () => setShowQuickMenu('logs')));
+      } catch (e) {
+        console.warn('menu-show-logs listener not available');
+      }
+
+      try {
+        unlisteners.push(await listen('menu-show-terminal', () => setShowQuickMenu('terminal')));
+      } catch (e) {
+        console.warn('menu-show-terminal listener not available');
+      }
+    };
+
+    setupListeners();
+
+    return () => {
+      unlisteners.forEach(f => f());
+    };
+  }, []);
+
+  const attachFile = (file: AttachedFile) => {
+    if (!attachedFiles.find(f => f.path === file.path)) { setAttachedFiles([...attachedFiles, file]); }
+    setShowQuickMenu('none');
+  };
+
+  const handleClearHistory = () => {
+    setConfirmAction(() => () => {
+      setChatHistory([]);
+      localStorage.removeItem('lars_chat_history');
+      setShowConfirmDialog(false);
+      setDeleteNotification({show: true, message: '대화 기록이 삭제되었습니다'});
+      setTimeout(() => setDeleteNotification({show: false, message: ''}), 2000);
+    });
+    setShowConfirmDialog(true);
+  };
+
+  const handleNewChat = () => {
+    setCurrentChat(null);
+    setInput('');
+    setResponse('');
+    setAttachedFiles([]);
+    setStatus('IDLE');
+  };
+
+  const handleDeleteChat = (chatId: string) => {
+    const newHistory = chatHistory.filter(chat => chat.id !== chatId);
+    setChatHistory(newHistory);
+    localStorage.setItem('lars_chat_history', JSON.stringify(newHistory));
+    if (currentChat?.id === chatId) {
+      handleNewChat();
+    }
+  };
+
+  const handleSelectChat = (chat: ChatItem) => {
+    console.log('대화 선택:', chat);
+    setCurrentChat(chat);
+    setActiveTab('chat');
+
+    // input 복원 (우선: input 필드 → fallback: messages)
+    if (chat.input) {
+      console.log('input 필드에서 복원:', chat.input);
+      setInput(chat.input);
+    } else if (chat.messages && chat.messages.length > 0) {
+      console.log('messages에서 복원');
+      const lastUserMessage = chat.messages.filter(m => m.role === 'user').pop();
+      if (lastUserMessage) {
+        console.log('user message:', lastUserMessage.content);
+        setInput(lastUserMessage.content);
+      }
+    } else {
+      console.log('input 데이터 없음');
+    }
+
+    // response 복원 (우선: response 필드 → fallback: messages)
+    if (chat.response && typeof chat.response === 'string') {
+      console.log('response 필드에서 복원:', chat.response.substring(0, 50));
+      setResponse(chat.response);
+    } else if (chat.messages && chat.messages.length > 0) {
+      console.log('messages에서 response 복원');
+      const lastAssistantMessage = chat.messages.filter(m => m.role === 'assistant').pop();
+      if (lastAssistantMessage) {
+        console.log('assistant message:', lastAssistantMessage.content.substring(0, 50));
+        setResponse(lastAssistantMessage.content);
+      }
+    } else {
+      console.log('response 데이터 없음');
+    }
+  };
+
+  // ESC 키로 음성 모드 종료
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && voiceMode !== 'off') {
+        setVoiceMode('off');
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [voiceMode]);
+
+  // 음성 입력 모드 관리
+  useEffect(() => {
+    if (voiceMode === 'input') {
+      console.log('[VOICE] Starting speech recognition...');
+      startSpeechRecognition({
+        onRecordingStart: () => {
+          console.log('[VOICE] Recording started');
+        },
+        onRecordingStop: () => {
+          console.log('[VOICE] Recording stopped');
+        },
+        onTranscription: (text: string) => {
+          console.log('[VOICE] Transcribed text:', text);
+          // 변환된 텍스트를 입력창에 자동 입력
+          setInput(text);
+          // 자동으로 메시지 전송
+          setTimeout(async () => {
+            try {
+              await handleSendMessage(text);
+            } catch (err) {
+              console.error('[VOICE] Failed to send message:', err);
+            }
+          }, 500);
+        },
+        onError: (error: Error) => {
+          console.error('[VOICE] STT Error:', error);
+          setResponse(`음성 인식 오류: ${error.message}`);
+        },
+      });
+    } else {
+      // 음성 입력 모드 종료 시 녹음 중지
+      stopSpeechRecognition();
+    }
+  }, [voiceMode]);
+
+  // 디버그: 콘솔에서 테스트 함수 실행 가능하도록 설정
+  useEffect(() => {
+    (window as any).__LARS_DEBUG__ = {
+      testElevenLabs: testElevenLabsAPI,
+      listVoices: listAvailableVoices,
+    };
+    console.log('🔧 Debug tools available: window.__LARS_DEBUG__');
+    console.log('- testElevenLabs(): Test ElevenLabs API');
+    console.log('- listVoices(): List available voices');
+  }, []);
+
+  useEffect(() => {
+    const init = async () => {
+      try {
+        const config = await invoke<any>('load_config');
+        if (config?.userName) setUser({ name: config.userName, email: config.userEmail, avatarUrl: config.avatarUrl || '' });
+        if (config?.modelType) updateModelStates(config.modelType);
+
+        // localStorage에서 대화 히스토리 로드
+        const savedHistory = localStorage.getItem('lars_chat_history');
+        if (savedHistory) {
+          try {
+            const parsed = JSON.parse(savedHistory);
+            const sorted = [...parsed].sort((a, b) => {
+              const dateA = new Date(a.date).getTime();
+              const dateB = new Date(b.date).getTime();
+              return dateB - dateA;
+            });
+            setChatHistory(sorted);
+          } catch (e) {
+            console.error('히스토리 파싱 실패:', e);
+            setChatHistory([]);
+          }
+        } else {
+          setChatHistory([]);
+        }
+      } catch (e) {
+        console.error('Init failed:', e);
+      }
+    };
+    init();
+
+    const unlisteners: Array<() => void> = [];
+
+    const setupListeners = async () => {
+      try {
+        try {
+          const unlistenSettings = await listen('menu-settings', () => setActiveTab('settings'));
+          if (typeof unlistenSettings === 'function') {
+            unlisteners.push(unlistenSettings);
+          }
+        } catch (e) {
+          console.warn('menu-settings listener not available');
+        }
+
+        try {
+          const unlistenAbout = await listen('menu-about', () => setShowAboutModal(true));
+          if (typeof unlistenAbout === 'function') {
+            unlisteners.push(unlistenAbout);
+          }
+        } catch (e) {
+          console.warn('menu-about listener not available');
+        }
+      } catch (e) {
+        console.warn('setupListeners error:', e);
+      }
+    };
+
+    setupListeners().catch(e => console.warn('Listener setup failed:', e));
+
+    return () => {
+      unlisteners.forEach(f => {
+        if (typeof f === 'function') {
+          try {
+            f();
+          } catch (e) {
+            console.warn('Unlisten error:', e);
+          }
+        }
+      });
+    };
+  }, []);
+
+  const renderContent = () => {
+    // Phase 1, 2, 3 기능들 (Tauri 앱에서는 표시하지 않음)
+    // 웹 브라우저에서 http://localhost:5173 으로 접속하여 사용
+    // if (activeTab === 'scraping') return <ScrapingDashboard />;
+    // if (activeTab === 'ocr') return <OCRPanel />;
+    // if (activeTab === 'change-detection') return <ChangeDetectionMonitor />;
+    // if (activeTab === 'seo') return <SEOAnalyticsDashboard />;
+    // if (activeTab === 'crm') return <CRMDashboard />;
+    // if (activeTab === 'workflows') return <AdvancedWorkflowExecutor />;
+    // if (activeTab === 'ppt-generation') return <PPTGenerationDashboard />;
+    // if (activeTab === 'integration') return <IntegrationDashboard />;
+
+    // Tauri 앱에서는 홈페이지만 표시
+    return <HomePage onLogout={handleLogout} />;
+
+    if (activeTab === 'themes') return (
+      <ThemeLibrary
+        selectedThemeType={selectedThemeType}
+        setSelectedThemeType={setSelectedThemeType}
+        selectedThemes={selectedThemes}
+        setSelectedThemes={setSelectedThemes}
+        onFreestyleCreate={(type) => {
+          console.log(`Creating ${type} template with AI`);
+        }}
+        onShare={(themeId) => {
+          console.log(`Sharing theme: ${themeId}`);
+        }}
+        onSchedule={(themeId) => {
+          console.log(`Scheduling theme: ${themeId}`);
+        }}
+        language={language}
+      />
+    );
+    if (activeTab === 'settings') return (
+      <Settings
+        onClose={() => setActiveTab('chat')}
+        onSave={(config) => {
+          setUser({
+            name: config.userName,
+            email: config.userEmail,
+            avatarUrl: config.avatarUrl || ''
+          });
+          // 에이전트 설정 저장
+          setModelType(config.modelType);
+          localStorage.setItem('modelType', config.modelType);
+        }}
+      />
+    );
+    if (activeTab === 'workspace') return (
+      <div className="workspace-view animate-in">
+        <header className="view-header">
+          <div style={{display: 'flex', alignItems: 'center', gap: '0.8rem'}}>
+            <GitBranch size={24} color="var(--accent-blue)" />
+            <h2>{language === 'ko' ? 'Workspace' : 'Workspace'}</h2>
+          </div>
+          <p className="view-desc">{language === 'ko' ? 'Workspace - 다중 에이전트 협력' : 'Workspace - Multi-agent collaboration'}</p>
+        </header>
+        <div className="workspace-content">
+          <WorkspaceMode
+            mode="workspace"
+            onModeChange={() => setActiveTab('chat')}
+            language={language}
+          />
+          <div style={{marginTop: '2rem', padding: '1rem', background: 'rgba(15, 23, 42, 0.5)', borderRadius: '12px', border: '1px solid rgba(100, 108, 255, 0.2)'}}>
+            <h3 style={{marginBottom: '1rem', color: '#60a5fa'}}>{language === 'ko' ? 'Workspace 사용 안내' : 'How to use Workspace'}</h3>
+            <div style={{fontSize: '0.9rem', lineHeight: '1.8', color: '#cbd5e1', display: 'grid', gap: '1rem'}}>
+              {language === 'ko' ? (
+                <>
+                  <p style={{display: 'flex', alignItems: 'flex-start', gap: '0.8rem'}}>
+                    <div style={{minWidth: '24px', display: 'flex', alignItems: 'center', marginTop: '2px'}}>
+                      <GlassmorphicIcon Icon={Sparkles} gradient="from-amber-400 to-orange-500" size={20} />
+                    </div>
+                    <span><strong>LARS Workspace</strong>는 협력 중심의 작업 환경입니다.</span>
+                  </p>
+                  <p style={{display: 'flex', alignItems: 'flex-start', gap: '0.8rem'}}>
+                    <div style={{minWidth: '24px', display: 'flex', alignItems: 'center', marginTop: '2px'}}>
+                      <GlassmorphicIcon Icon={ClipboardList} gradient="from-blue-400 to-cyan-500" size={20} />
+                    </div>
+                    <span><strong>4단계 워크플로우</strong>로 사용자의 질문을 분석하고 다중 에이전트가 협력하여 최적의 결과를 생성합니다.</span>
+                  </p>
+                  <p style={{display: 'flex', alignItems: 'flex-start', gap: '0.8rem'}}>
+                    <div style={{minWidth: '24px', display: 'flex', alignItems: 'center', marginTop: '2px'}}>
+                      <GlassmorphicIcon Icon={Users} gradient="from-emerald-400 to-teal-500" size={20} />
+                    </div>
+                    <span>각 단계에서 어떤 에이전트가 작동하는지 실시간으로 확인할 수 있습니다.</span>
+                  </p>
+                  <p style={{display: 'flex', alignItems: 'flex-start', gap: '0.8rem'}}>
+                    <div style={{minWidth: '24px', display: 'flex', alignItems: 'center', marginTop: '2px'}}>
+                      <GlassmorphicIcon Icon={Zap} gradient="from-yellow-400 to-amber-500" size={20} />
+                    </div>
+                    <span>에이전트 병렬 처리를 통해 빠르고 정확한 결과를 제공합니다.</span>
+                  </p>
+                  <div style={{marginTop: '1rem', padding: '1rem', background: 'rgba(59, 130, 246, 0.1)', borderRadius: '8px', borderLeft: '3px solid #60a5fa'}}>
+                    <strong>시작하기:</strong> 채팅 탭에서 질문을 입력하면 Workspace 모드로 자동 전환됩니다.
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p style={{display: 'flex', alignItems: 'flex-start', gap: '0.8rem'}}>
+                    <div style={{minWidth: '24px', display: 'flex', alignItems: 'center', marginTop: '2px'}}>
+                      <GlassmorphicIcon Icon={Sparkles} gradient="from-amber-400 to-orange-500" size={20} />
+                    </div>
+                    <span><strong>LARS Workspace</strong> is a collaboration-focused work environment.</span>
+                  </p>
+                  <p style={{display: 'flex', alignItems: 'flex-start', gap: '0.8rem'}}>
+                    <div style={{minWidth: '24px', display: 'flex', alignItems: 'center', marginTop: '2px'}}>
+                      <GlassmorphicIcon Icon={ClipboardList} gradient="from-blue-400 to-cyan-500" size={20} />
+                    </div>
+                    <span><strong>4-stage workflow</strong> analyzes your questions and multiple agents collaborate to generate optimal results.</span>
+                  </p>
+                  <p style={{display: 'flex', alignItems: 'flex-start', gap: '0.8rem'}}>
+                    <div style={{minWidth: '24px', display: 'flex', alignItems: 'center', marginTop: '2px'}}>
+                      <GlassmorphicIcon Icon={Users} gradient="from-emerald-400 to-teal-500" size={20} />
+                    </div>
+                    <span>You can see in real-time which agents are working at each stage.</span>
+                  </p>
+                  <p style={{display: 'flex', alignItems: 'flex-start', gap: '0.8rem'}}>
+                    <div style={{minWidth: '24px', display: 'flex', alignItems: 'center', marginTop: '2px'}}>
+                      <GlassmorphicIcon Icon={Zap} gradient="from-yellow-400 to-amber-500" size={20} />
+                    </div>
+                    <span>Parallel agent processing provides fast and accurate results.</span>
+                  </p>
+                  <div style={{marginTop: '1rem', padding: '1rem', background: 'rgba(59, 130, 246, 0.1)', borderRadius: '8px', borderLeft: '3px solid #60a5fa'}}>
+                    <strong>Get Started:</strong> Enter a question in the Chat tab to automatically switch to Workspace mode.
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+    if (activeTab === 'ecosystem') return <div className="ecosystem-standalone"><Ecosystem language={language} /></div>;
+    if (activeTab === 'statistics') return <div className="statistics-standalone"><Statistics /></div>;
+    return (
+      <div className="chat-content-area animate-in">
+        <header className="viewport-header">
+          <div className="model-selector-wrapper">
+            <div className={`model-badge ${showModelMenu ? 'active' : ''}`} onClick={() => setShowModelMenu(!showModelMenu)}>
+              <div className="badge-content-left">
+                <span className="persona-name">{activeModel}</span>
+                <span className="model-sep">|</span>
+                <span className="actual-model">{activeModelName}</span>
+              </div>
+              <ChevronDown size={16} className="dropdown-arrow-icon" />
+            </div>
+            {showModelMenu && (
+              <div className="model-dropdown">
+                <div className="dropdown-tabs">
+                  <button className={dropdownTab === 'core' ? 'active' : ''} onClick={(e) => { e.stopPropagation(); setDropdownTab('core'); }}>LARS 핵심 엔진</button>
+                  <button className={dropdownTab === 'extended' ? 'active' : ''} onClick={(e) => { e.stopPropagation(); setDropdownTab('extended'); }}>확장 모델</button>
+                </div>
+                <div className="dropdown-scroll-area">
+                  {[
+                    { id: 'LARS-Native', name: 'LARS-Native', model: 'Execution', desc: '수술적 코딩 & 고속 구현 (Local High-Speed)', tab: 'core' },
+                    { id: 'LARS-Cosmos', name: 'LARS-Cosmos', model: 'Architecture', desc: '글로벌 분석 & 지능형 연구 (Deep Context)', tab: 'core' },
+                    { id: 'LARS-Prime', name: 'LARS-Prime', model: 'Logic', desc: '무결점 추론 & 보안 감사 (SOTA Intelligence)', tab: 'core' },
+                    { id: 'Luminaic', name: 'Luminaic', model: 'Logic & Analysis', desc: 'LARS 신경망 기반 대규모 분석', tab: 'extended' },
+                    { id: 'Aivora', name: 'Aivora', model: 'Emotional AI', desc: 'LARS 신경망 기반 감정 분석', tab: 'extended' },
+                    { id: 'Rekora', name: 'Rekora', model: '3D Design', desc: 'LARS 신경망 기반 3D 설계', tab: 'extended' },
+                    { id: 'Synzora', name: 'Synzora', model: 'Data Graph', desc: 'LARS 신경망 기반 그래프 분석', tab: 'extended' }
+                  ].filter(item => item.tab === dropdownTab).map(item => (
+                    <button key={item.id} className={`model-option ${activeModel === item.id ? 'selected' : ''}`} onClick={() => handleModelChange(item.id)}>
+                      <div className="option-name">{item.name} <span className="option-model-tag">{item.model}</span></div>
+                      <div className="option-desc">{item.desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </header>
+
+        <section className="chat-viewport">
+          {currentChat ? (
+            <div className="chat-messages">
+              <div key={currentChat.id} className="message-group">
+                <div className="message-bubble user">
+                  <div className="message-content">{currentChat.input}</div>
+                </div>
+                <div className="message-bubble ai">
+                  <div className="bubble-header">LARS Prism AI</div>
+                  {generationMode === 'workspace' && workspaceSteps.length > 0 ? (
+                    <div>
+                      <WorkspaceResult
+                        steps={workspaceSteps}
+                        language={language}
+                        finalResult={currentChat.response}
+                        onCheckpointApprove={(stepNumber, checkpointId) => {
+                          // 체크포인트 승인 처리
+                          setWorkspaceSteps((prevSteps) => {
+                            const updated = JSON.parse(JSON.stringify(prevSteps));
+                            const step = updated[stepNumber - 1];
+                            if (step && step.checkpoints) {
+                              const checkpoint = step.checkpoints.find((c: any) => c.id === checkpointId);
+                              if (checkpoint) {
+                                checkpoint.status = 'approved';
+                                checkpoint.resolvedAt = Date.now();
+                              }
+                            }
+                            return updated;
+                          });
+                          console.log(`[WORKFLOW] ✅ Checkpoint ${checkpointId} approved`);
+                        }}
+                        onCheckpointReject={(stepNumber, checkpointId, reason) => {
+                          // 체크포인트 거부 처리
+                          setWorkspaceSteps((prevSteps) => {
+                            const updated = JSON.parse(JSON.stringify(prevSteps));
+                            const step = updated[stepNumber - 1];
+                            if (step && step.checkpoints) {
+                              const checkpoint = step.checkpoints.find((c: any) => c.id === checkpointId);
+                              if (checkpoint) {
+                                checkpoint.status = 'rejected';
+                                checkpoint.feedback = reason;
+                                checkpoint.resolvedAt = Date.now();
+                              }
+                            }
+                            return updated;
+                          });
+                          console.log(`[WORKFLOW] ❌ Checkpoint ${checkpointId} rejected: ${reason}`);
+                        }}
+                        onPathSelect={(stepNumber, checkpointId, optionId) => {
+                          // 경로 선택 처리
+                          setWorkspaceSteps((prevSteps) => {
+                            const updated = JSON.parse(JSON.stringify(prevSteps));
+                            const step = updated[stepNumber - 1];
+                            if (step && step.checkpoints) {
+                              const checkpoint = step.checkpoints.find((c: any) => c.id === checkpointId);
+                              if (checkpoint) {
+                                checkpoint.selectedOptionId = optionId;
+                                checkpoint.status = 'approved';
+                                checkpoint.resolvedAt = Date.now();
+                              }
+                            }
+                            return updated;
+                          });
+                          console.log(`[WORKFLOW] 🔀 Path selected: ${optionId}`);
+                        }}
+                        agentPoolState={agentPoolState}
+                      />
+                    </div>
+                  ) : activeModel === 'Rekora' ? (
+                    <div>
+                      <RekoraImageGenerator prompt={currentChat.input} />
+                      <div style={{ marginTop: '16px', padding: '12px', background: 'rgba(139, 92, 246, 0.1)', borderRadius: '8px', fontSize: '13px', color: '#c0c0c0' }}>
+                        ✨ Rekora 엔진으로 {currentChat.input}에 대한 이미지를 생성했습니다.
+                      </div>
+                    </div>
+                  ) : generationType && generationType !== 'chat' && generationMetadata && currentChat.response === response ? (
+                    <GenerationResult
+                      content={currentChat.response}
+                      generationType={generationType}
+                      format={generationMetadata.primary_format || 'txt'}
+                      metadata={generationMetadata}
+                      language={language}
+                    />
+                  ) : (
+                    <div>
+                      <CodeAgentRenderer content={currentChat.response} onApplyPatch={handleApplyPatch} onAppControl={handleAppControl} tokens={currentTokens} />
+                      {searchSources && searchSources.length > 0 && (
+                        <SourceCitations sources={searchSources} language={language} />
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="welcome-screen">
+              <h2>{getGreeting().title}</h2>
+            </div>
+          )}
+        </section>
+
+        {showQuickMenu !== 'none' && (
+          <div className="quick-menu-overlay" onClick={() => setShowQuickMenu('none')}>
+            <div className="quick-menu-wrapper" onClick={e => e.stopPropagation()}>
+              <div className="quick-menu-content">
+                {showQuickMenu === 'files' && <Files onSelectFile={(name, path) => attachFile({ name, path })} />}
+                {showQuickMenu === 'security' && <SecurityHub onClose={() => setShowQuickMenu('none')} />}
+                {showQuickMenu === 'artifacts' && <Artifacts onClose={() => setShowQuickMenu('none')} />}
+                {showQuickMenu === 'amazon-q' && <AmazonQAssistant onClose={() => setShowQuickMenu('none')} />}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {voiceMode !== 'off' && (
+          <VoiceVisualizer
+            mode={voiceMode as 'input' | 'output'}
+            isActive={voiceMode !== 'off'}
+            onClose={() => setVoiceMode('off')}
+          />
+        )}
+
+        {showHarmonizedConfirm && harmonizedData && (
+          <div className="harmonized-modal-overlay" onClick={() => setShowHarmonizedConfirm(false)}>
+            <div className="harmonized-modal" onClick={e => e.stopPropagation()}>
+              <div className="harmonized-header">
+                <h3>생성 준비 완료</h3>
+                <button className="modal-close" onClick={() => setShowHarmonizedConfirm(false)}>✕</button>
+              </div>
+              <div className="harmonized-content">
+                <div className="generation-type-display">
+                  <span className="type-badge">{harmonizedData.type.toUpperCase()}</span>
+                  <p className="confidence-text">신뢰도: {(harmonizedData.confidence * 100).toFixed(0)}%</p>
+                </div>
+                <div className="generation-preview">
+                  <p className="preview-label">요청 내용</p>
+                  <p className="preview-text">{harmonizedData.prompt}</p>
+                </div>
+              </div>
+              <div className="harmonized-actions">
+                <button className="action-btn cancel" onClick={() => setShowHarmonizedConfirm(false)}>취소</button>
+                <button
+                  className="action-btn proceed"
+                  onClick={async () => {
+                    setShowHarmonizedConfirm(false);
+                    // 실제 생성 로직 실행
+                    setStatus('ANALYZING');
+                    setResponse('');
+                    try {
+                      let fullContent = '';
+                      for await (const chunk of generateContentStream(harmonizedData.prompt, [], language)) {
+                        if (chunk.startsWith('[META]') && chunk.includes('[/META]')) {
+                          const metaJson = chunk.slice(6, chunk.indexOf('[/META]'));
+                          const metadata = JSON.parse(metaJson);
+                          setGenerationMetadata(metadata);
+                        } else {
+                          fullContent += chunk;
+                          setResponse(fullContent);
+                        }
+                      }
+                      // 기존 대화에 메시지 추가 또는 새 대화 생성
+                      if (currentChat) {
+                        // 기존 대화에 메시지 추가 (같은 세션 계속)
+                        const updatedMessages = [
+                          ...currentChat.messages,
+                          { role: 'user', content: harmonizedData.prompt },
+                          { role: 'assistant', content: fullContent }
+                        ];
+                        const updatedChat: ChatItem = {
+                          ...currentChat,
+                          response: fullContent,
+                          messages: updatedMessages
+                        };
+
+                        const updatedHistory = chatHistory.map(chat =>
+                          chat.id === currentChat.id ? updatedChat : chat
+                        );
+
+                        setChatHistory(updatedHistory);
+                        localStorage.setItem('lars_chat_history', JSON.stringify(updatedHistory));
+                        setCurrentChat(updatedChat);
+                      } else {
+                        // 새로운 대화 시작
+                        const newChat: ChatItem = {
+                          id: Date.now().toString(),
+                          title: harmonizedData.prompt.substring(0, 50) || '대화',
+                          date: new Date().toLocaleDateString('ko-KR'),
+                          input: harmonizedData.prompt,
+                          response: fullContent,
+                          messages: [
+                            { role: 'user', content: harmonizedData.prompt },
+                            { role: 'assistant', content: fullContent }
+                          ]
+                        };
+                        const newHistory = [newChat, ...chatHistory];
+                        setChatHistory(newHistory);
+                        localStorage.setItem('lars_chat_history', JSON.stringify(newHistory));
+                        setCurrentChat(newChat);
+                      }
+                      setInput('');
+                      setStatus('SUCCESS');
+                    } catch (err) {
+                      console.error('[HARMONIZED] Generation failed:', err);
+                      setResponse(`Error: ${err}`);
+                      setStatus('ERROR');
+                    }
+                  }}
+                >
+                  진행
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <footer className="input-area">
+          <div style={{
+            maxWidth: '900px',
+            margin: '1rem auto 0',
+            width: '100%',
+            boxSizing: 'border-box'
+          }}>
+            {attachedFiles.length > 0 && (
+              <div style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '8px',
+                padding: '12px 16px',
+                background: 'rgba(0,0,0,0.2)',
+                borderBottom: '1px solid rgba(255,255,255,0.1)',
+                borderRadius: '28px 28px 0 0'
+              }}>
+                {attachedFiles.map(file => (
+                  <div key={file.path} style={{
+                    position: 'relative',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    padding: '6px 12px',
+                    background: 'rgba(59, 130, 246, 0.15)',
+                    border: '1px solid rgba(59, 130, 246, 0.3)',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    fontSize: '13px'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'rgba(59, 130, 246, 0.25)';
+                    e.currentTarget.style.borderColor = 'rgba(59, 130, 246, 0.5)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'rgba(59, 130, 246, 0.15)';
+                    e.currentTarget.style.borderColor = 'rgba(59, 130, 246, 0.3)';
+                  }}>
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: '24px',
+                      height: '24px',
+                      background: 'rgba(59, 130, 246, 0.3)',
+                      borderRadius: '4px',
+                      position: 'relative',
+                      fontSize: '10px',
+                      fontWeight: 'bold',
+                      color: '#60a5fa'
+                    }}>
+                      <span style={{
+                        position: 'absolute',
+                        fontSize: '12px',
+                        lineHeight: '1'
+                      }}>
+                        {file.name.endsWith('.pdf') ? 'PDF' :
+                         file.name.endsWith('.txt') ? 'TXT' :
+                         file.name.endsWith('.docx') || file.name.endsWith('.doc') ? 'DOC' :
+                         file.name.endsWith('.xlsx') || file.name.endsWith('.xls') ? 'XLS' :
+                         file.name.endsWith('.pptx') || file.name.endsWith('.ppt') ? 'PPT' :
+                         file.name.endsWith('.png') || file.name.endsWith('.jpg') || file.name.endsWith('.jpeg') ? 'IMG' :
+                         file.name.endsWith('.zip') || file.name.endsWith('.rar') ? 'ZIP' :
+                         '📎'}
+                      </span>
+                    </div>
+                    <span style={{
+                      color: '#d1d5db',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      maxWidth: '150px'
+                    }}>
+                      {file.name}
+                    </span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setAttachedFiles(attachedFiles.filter(f => f.path !== file.path));
+                      }}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: '#9ca3af',
+                        cursor: 'pointer',
+                        fontSize: '12px',
+                        padding: '0 4px',
+                        display: 'flex',
+                        alignItems: 'center'
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.color = '#ef4444')}
+                      onMouseLeave={(e) => (e.currentTarget.style.color = '#9ca3af')}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="input-container" style={{
+              margin: attachedFiles.length > 0 ? '0' : '1rem auto 3.5rem',
+              borderRadius: attachedFiles.length > 0 ? '0 0 28px 28px' : '28px'
+            }}>
+            <div className="input-left">
+              <div className="add-menu-wrapper">
+                <button className={`add-btn ${showAddMenu ? 'active' : ''}`} onClick={() => setShowAddMenu(!showAddMenu)} title="기능 추가">
+                  <Plus size={24} />
+                </button>
+              {showAddMenu && (
+                <div className="add-menu-dropdown">
+                  <button className="menu-item" onClick={() => { setExecutionMode('query'); setShowAddMenu(false); }}>
+                    <GlassmorphicIcon Icon={Search} gradient="from-blue-400 to-cyan-500" size={32} />
+                    <span className="item-text">{TEXTS[language as keyof typeof TEXTS]?.query || '쿼리'}</span>
+                  </button>
+                  <div className="menu-divider" style={{ height: '1px', background: 'rgba(255,255,255,0.1)', margin: '8px 0' }} />
+                  <button className="menu-item" onClick={() => { setShowQuickMenu('files'); setShowAddMenu(false); }}>
+                    <GlassmorphicIcon Icon={FolderPlus} gradient="from-blue-400 to-indigo-500" size={32} />
+                    <span className="item-text">파일 추가 (Context)</span>
+                  </button>
+                  <button className="menu-item" onClick={() => { setShowQuickMenu('security'); setShowAddMenu(false); }}>
+                    <GlassmorphicIcon Icon={ShieldCheck} gradient="from-emerald-400 to-teal-500" size={32} />
+                    <span className="item-text">보안 · 터미널 · 로그</span>
+                  </button>
+                  <button className="menu-item" onClick={() => { setShowQuickMenu('amazon-q'); setShowAddMenu(false); }}>
+                    <GlassmorphicIcon Icon={Sparkles} gradient="from-amber-400 to-orange-500" size={32} />
+                    <span className="item-text">Amazon Q (지능형 조수)</span>
+                  </button>
+                  <button className="menu-item" onClick={() => { setActiveTab('ecosystem'); setShowAddMenu(false); }}>
+                    <GlassmorphicIcon Icon={LayoutGrid} gradient="from-indigo-400 to-cyan-500" size={32} />
+                    <span className="item-text">LARS 에코시스템</span>
+                  </button>
+                  <div className="menu-divider" style={{ height: '1px', background: 'rgba(255,255,255,0.1)', margin: '8px 0' }} />
+                  <button className="menu-item" onClick={() => { setGenerationMode(generationMode === 'workspace' ? 'chat' : 'workspace'); setShowAddMenu(false); }}>
+                    <GlassmorphicIcon Icon={GitBranch} gradient={generationMode === 'workspace' ? 'from-purple-400 to-pink-500' : 'from-gray-400 to-gray-500'} size={32} />
+                    <span className="item-text">
+                      LARS Workspace {generationMode === 'workspace' ? '비활성화' : '활성화'}
+                    </span>
+                  </button>
+                </div>
+              )}
+            </div>
+            <button
+              className={`file-attach-btn ${attachedFiles.length > 0 ? 'has-files' : ''}`}
+              onClick={() => setShowQuickMenu('files')}
+              title={attachedFiles.length > 0 ? `${attachedFiles.length}개 파일 첨부됨` : "파일 첨부"}
+            >
+              <FolderPlus size={20} />
+              {attachedFiles.length > 0 && <span style={{ marginLeft: '4px', fontSize: '12px', fontWeight: 'bold' }}>{attachedFiles.length}</span>}
+            </button>
+            {executionMode === 'dev' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div className="project-path-row">
+                  <FolderOpen size={14} />
+                  <span className="path-text">
+                    {projectPath || '프로젝트 폴더 (선택 사항)'}
+                  </span>
+                  <button className="path-select-btn" onClick={handleSelectProjectPath}>폴더 선택</button>
+                  {projectPath && (
+                    <button className="path-clear-btn" onClick={() => setProjectPath('')}>✕</button>
+                  )}
+                </div>
+                <button
+                  className={`agent-mode-toggle ${useSubAgentMode ? 'active' : ''}`}
+                  onClick={() => setUseSubAgentMode(!useSubAgentMode)}
+                  title={useSubAgentMode ? '에이전트 모드 비활성화' : '에이전트 모드 활성화'}
+                >
+                  <Users size={14} />
+                  <span>에이전트 모드 {useSubAgentMode ? 'ON' : 'OFF'}</span>
+                </button>
+              </div>
+            )}
+            </div>
+
+            <textarea
+              placeholder={TEXTS[language as keyof typeof TEXTS]?.inputPlaceholder || '커리큘럼 입력하세요 (Shift+Enter로 줄바꿈)'}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleCommand(); } }}
+            />
+
+            <div className="input-right">
+              <button
+                className={`voice-btn ${voiceMode}`}
+                onClick={() => {
+                  if (voiceMode === 'off') setVoiceMode('input');
+                  else if (voiceMode === 'input') setVoiceMode('output');
+                  else setVoiceMode('off');
+                }}
+                title={voiceMode === 'off' ? '음성 입력 활성화' : voiceMode === 'input' ? '음성 출력으로 전환' : '음성 비활성화'}
+              >
+                {voiceMode === 'off' && <Mic size={18} />}
+                {voiceMode === 'input' && <Mic size={18} />}
+                {voiceMode === 'output' && <Volume2 size={18} />}
+              </button>
+              <button className="send-btn" onClick={handleCommand} disabled={status === 'ANALYZING'}>
+                {status === 'ANALYZING' ? <div className="spinner-small" /> : <CornerDownLeft size={24} />}
+              </button>
+            </div>
+          </div>
+          </div>
+        </footer>
+
+        {!currentChat && (
+          <footer className="company-footer">
+            <div className="company-details">
+              <p className="company-details-text">
+                상호명: 엘에이알에스(LARS Inc.) | 대표자: 남종수 | 사업자등록번호: 373-35-01874 | 통신판매신고번호: 2025-서울서초-3944
+              </p>
+              <p className="company-details-text">
+                고객센터: {import.meta.env.VITE_CONTACT_EMAIL || 'lars@lars-technologies.com'} | 운영시간: 평일 10:00 – 18:00 | 본사: 서울시 마포구 월드컵북로350, 401호
+              </p>
+              <p className="company-copyright">© 2026 LARS Technologies. All rights reserved.</p>
+            </div>
+          </footer>
+        )}
+      </div>
+    );
+  };
+
+  // 인증되지 않으면 로그인/회원가입 페이지 표시 (필수)
+  if (!isAuthenticated) {
+    return (
+      <Auth
+        onAuthSuccess={() => {
+          const token = getToken();
+          if (token) {
+            const user = getStoredUser();
+            if (user) {
+              setAuthUser(user);
+              setUser({
+                name: user.username,
+                email: user.email,
+                avatarUrl: null  // 기본 아바타 사용 (사용자명 첫 글자)
+              });
+              setIsAuthenticated(true);
+              console.log('[AUTH] 로그인 완료:', user.username);
+            }
+          }
+        }}
+      />
+    );
+  }
+
+  return (
+    <div className={`app-container ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+      <aside className="sidebar">
+        <div className="sidebar-header">
+          <div className="sidebar-logo">
+            <img src="/app-logo.png" className="logo-img" alt="Logo" />
+            {!sidebarCollapsed && <span className="logo-text">LARS Prism</span>}
+          </div>
+          <button className="sidebar-toggle-btn" onClick={() => setSidebarCollapsed(!sidebarCollapsed)} title={sidebarCollapsed ? "펼치기" : "접기"}>
+             {sidebarCollapsed ? '»' : '«'}
+          </button>
+        </div>
+        <div className="sidebar-nav">
+          <button className={`nav-item ${activeTab === 'chat' ? 'active' : ''}`} onClick={() => { setActiveTab('chat'); handleNewChat(); }}>
+            <MessageSquare size={20} /> {!sidebarCollapsed && <span>{TEXTS[language as keyof typeof TEXTS]?.chat || '채팅'}</span>}
+          </button>
+          <button className={`nav-item ${activeTab === 'workspace' ? 'active' : ''}`} onClick={() => setActiveTab('workspace')}>
+            <GitBranch size={20} /> {!sidebarCollapsed && <span>{language === 'ko' ? 'Workspace' : 'Workspace'}</span>}
+          </button>
+          <button className={`nav-item ${activeTab === 'statistics' ? 'active' : ''}`} onClick={() => setActiveTab('statistics')}>
+            <BarChart3 size={20} /> {!sidebarCollapsed && <span>{language === 'ko' ? '통계분석' : 'Statistics'}</span>}
+          </button>
+          <button className={`nav-item ${activeTab === 'ecosystem' ? 'active' : ''}`} onClick={() => setActiveTab('ecosystem')}>
+            <LayoutGrid size={20} /> {!sidebarCollapsed && <span>{TEXTS[language as keyof typeof TEXTS]?.ecosystem || '에코시스템'}</span>}
+          </button>
+
+          {/* Phase 1, 2, 3 데이터 엔진 */}
+          <div className="sidebar-divider" style={{margin: '12px 0', borderTop: '1px solid rgba(255,255,255,0.1)'}}>
+            {!sidebarCollapsed && <span style={{fontSize: '11px', color: 'rgba(255,255,255,0.5)', paddingLeft: '8px'}}>데이터 엔진</span>}
+          </div>
+
+          <button className={`nav-item ${activeTab === 'scraping' ? 'active' : ''}`} onClick={() => setActiveTab('scraping')}>
+            <GlobeIcon size={20} /> {!sidebarCollapsed && <span>🔗 웹 스크래핑</span>}
+          </button>
+          <button className={`nav-item ${activeTab === 'ocr' ? 'active' : ''}`} onClick={() => setActiveTab('ocr')}>
+            <FileText size={20} /> {!sidebarCollapsed && <span>📄 OCR</span>}
+          </button>
+          <button className={`nav-item ${activeTab === 'change-detection' ? 'active' : ''}`} onClick={() => setActiveTab('change-detection')}>
+            <Eye size={20} /> {!sidebarCollapsed && <span>👁️ 변경 감지</span>}
+          </button>
+
+          <div className="sidebar-divider" style={{margin: '12px 0', borderTop: '1px solid rgba(255,255,255,0.1)'}}>
+            {!sidebarCollapsed && <span style={{fontSize: '11px', color: 'rgba(255,255,255,0.5)', paddingLeft: '8px'}}>분석 &amp; 통합</span>}
+          </div>
+
+          <button className={`nav-item ${activeTab === 'seo' ? 'active' : ''}`} onClick={() => setActiveTab('seo')}>
+            <TrendingUp size={20} /> {!sidebarCollapsed && <span>📊 SEO 분석</span>}
+          </button>
+          <button className={`nav-item ${activeTab === 'crm' ? 'active' : ''}`} onClick={() => setActiveTab('crm')}>
+            <Users size={20} /> {!sidebarCollapsed && <span>👥 CRM</span>}
+          </button>
+          <button className={`nav-item ${activeTab === 'workflows' ? 'active' : ''}`} onClick={() => setActiveTab('workflows')}>
+            <Zap size={20} /> {!sidebarCollapsed && <span>⚙️ 워크플로우</span>}
+          </button>
+
+          <div className="sidebar-divider" style={{margin: '12px 0', borderTop: '1px solid rgba(255,255,255,0.1)'}}>
+            {!sidebarCollapsed && <span style={{fontSize: '11px', color: 'rgba(255,255,255,0.5)', paddingLeft: '8px'}}>출력 &amp; 통합</span>}
+          </div>
+
+          <button className={`nav-item ${activeTab === 'ppt-generation' ? 'active' : ''}`} onClick={() => setActiveTab('ppt-generation')}>
+            <FileText size={20} /> {!sidebarCollapsed && <span>📊 PPT 생성</span>}
+          </button>
+          <button className={`nav-item ${activeTab === 'integration' ? 'active' : ''}`} onClick={() => setActiveTab('integration')}>
+            <Grid size={20} /> {!sidebarCollapsed && <span>🔗 통합 대시보드</span>}
+          </button>
+          <button className={`nav-item ${activeTab === 'themes' ? 'active' : ''}`} onClick={() => setActiveTab('themes')}>
+            <Palette size={20} /> {!sidebarCollapsed && <span>{TEXTS[language as keyof typeof TEXTS]?.themes || 'Design Themes'}</span>}
+          </button>
+        </div>
+        <div className="sidebar-history">
+          {!sidebarCollapsed && (
+            <div className="history-label-row">
+              <div className="history-label">{TEXTS[language as keyof typeof TEXTS]?.recentChats || 'RECENT CHATS'}</div>
+              {chatHistory && chatHistory.length > 0 && (
+                <button className="clear-history-btn" onClick={handleClearHistory} title="대화 기록 삭제">
+                  <X size={16} />
+                </button>
+              )}
+            </div>
+          )}
+          <div className="history-list">
+            {chatHistory?.map(chat => (
+              <div
+                key={chat.id}
+                className="history-item-wrapper"
+                onMouseEnter={() => setHoveredChatId(chat.id)}
+                onMouseLeave={() => setHoveredChatId(null)}
+              >
+                <button
+                  className={`history-item ${currentChat?.id === chat.id ? 'active' : ''}`}
+                  onClick={() => handleSelectChat(chat)}
+                >
+                  <MessageSquare size={18} />
+                  {!sidebarCollapsed && <div className="history-info"><div className="history-title">{chat.title}</div></div>}
+                </button>
+                {!sidebarCollapsed && hoveredChatId === chat.id && (
+                  <button
+                    className="delete-chat-btn"
+                    onClick={(e) => { e.stopPropagation(); handleDeleteChat(chat.id); }}
+                    title="삭제"
+                  >
+                    <X size={16} />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="sidebar-footer">
+           <div className="profile-summary" onClick={() => setActiveTab('settings')}>
+             <div className="avatar-small">
+               {user?.avatarUrl ? (
+                 <img src={user.avatarUrl} alt="Profile" className="avatar-image" />
+               ) : (
+                 user?.name ? user.name[0] : 'U'
+               )}
+             </div>
+             {!sidebarCollapsed && <div className="profile-info"><div className="profile-name">{user?.name}</div><div className="profile-email">{user?.email}</div></div>}
+           </div>
+           <button
+             className="logout-btn"
+             onClick={handleLogout}
+             title={TEXTS[language as keyof typeof TEXTS]?.logOut || '로그아웃'}
+           >
+             <LogOut size={20} />
+             {!sidebarCollapsed && <span>{TEXTS[language as keyof typeof TEXTS]?.logOut || '로그아웃'}</span>}
+           </button>
+        </div>
+      </aside>
+      <main className="main-content">
+        {renderContent()}
+      </main>
+
+      {showAboutModal && (
+        <div className="about-modal-backdrop" onClick={() => setShowAboutModal(false)}>
+          <div className="about-modal" onClick={(e) => e.stopPropagation()}>
+            <button className="about-close-btn" onClick={() => setShowAboutModal(false)}><X size={18} /></button>
+            <img className="about-app-icon" src={`/app-logo.png?v=${Date.now()}`} alt="LARS Prism" />
+            <h2 className="about-app-title">LARS Prism</h2>
+            <p className="about-app-version">Version 1.4.0</p>
+            <p className="about-app-copy">© 2026 LARS Inc. All rights reserved.</p>
+          </div>
+        </div>
+      )}
+
+      {showConfirmDialog && (
+        <div className="confirm-modal-backdrop" onClick={() => setShowConfirmDialog(false)}>
+          <div className="confirm-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="confirm-header">
+              <img src={`/app-logo.png?v=${Date.now()}`} alt="LARS Prism" className="confirm-icon" />
+              <h3>LARS Prism</h3>
+            </div>
+            <p className="confirm-message">정말 모든 대화 기록을 삭제하시겠습니까?</p>
+            <div className="confirm-buttons">
+              <button
+                className="confirm-cancel"
+                onClick={() => setShowConfirmDialog(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="confirm-ok"
+                onClick={() => {
+                  confirmAction?.();
+                  setShowConfirmDialog(false);
+                }}
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteNotification.show && (
+        <div className="delete-notification-toast">
+          <div className="delete-notification-content">
+            ✅ {deleteNotification.message}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default App;

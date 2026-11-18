@@ -1,0 +1,98 @@
+{
+  "productName": "LARS Prism",
+  "version": "1.0.0",
+  "identifier": "com.lars_technologies.prism",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "LARS Prism",
+        "width": 1200,
+        "height": 700,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "apk",
+      "aab"
+    ],
+    "identifier": "com.lars_technologies.prism",
+    "icon": [
+      "icons/icon.png"
+    ]
+  },
+  "android": {
+    "minimumSdkVersion": 24,
+    "targetSdkVersion": 34,
+    "compileSdkVersion": 34,
+    "useAndroidGradle": true,
+    "gradle": {
+      "agpVersion": "7.4.2"
+    },
+    "permissions": [
+      "android.permission.INTERNET",
+      "android.permission.ACCESS_NETWORK_STATE",
+      "android.permission.CAMERA",
+      "android.permission.READ_EXTERNAL_STORAGE",
+      "android.permission.WRITE_EXTERNAL_STORAGE",
+      "android.permission.RECORD_AUDIO"
+    ],
+    "features": [
+      {
+        "name": "android.hardware.camera",
+        "required": false
+      },
+      {
+        "name": "android.hardware.microphone",
+        "required": false
+      }
+    ],
+    "keyStore": {
+      "path": "YOUR_KEYSTORE_PATH",
+      "alias": "YOUR_KEY_ALIAS",
+      "password": "YOUR_KEYSTORE_PASSWORD"
+    }
+  },
+  "tauri": {
+    "allowlist": {
+      "all": false,
+      "http": {
+        "request": true,
+        "fetch": true,
+        "scope": ["http://*", "https://*"]
+      },
+      "fs": {
+        "all": false,
+        "scope": [
+          "$CACHE/*",
+          "$DOCUMENT/*",
+          "$DOWNLOAD/*",
+          "$PICTURE/*"
+        ]
+      },
+      "window": {
+        "all": false,
+        "create": true,
+        "center": true,
+        "requestUserAttention": true,
+        "setResizable": true,
+        "setFullscreen": true
+      },
+      "notification": {
+        "all": true
+      }
+    }
+  }
+}

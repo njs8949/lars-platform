@@ -1,0 +1,582 @@
+.auto-installer-panel {
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  padding: 20px;
+  margin: 16px 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+}
+
+.panel-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ==================== Detection Header ==================== */
+
+.detection-header,
+.approval-header,
+.installation-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: rgba(100, 116, 139, 0.1);
+  border-radius: 8px;
+  border-left: 4px solid #60a5fa;
+}
+
+.detection-header h3,
+.approval-header h3,
+.installation-header h3 {
+  margin: 0 0 4px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.detection-header .subtitle,
+.approval-header .subtitle,
+.installation-header .subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+.loading-icon,
+.detection-icon {
+  width: 24px;
+  height: 24px;
+  color: #60a5fa;
+  animation: spin 2s linear infinite;
+}
+
+.completion-icon {
+  width: 28px;
+  height: 28px;
+  color: #10b981;
+  flex-shrink: 0;
+}
+
+.completion-icon.warning {
+  color: #f59e0b;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* ==================== Loading Bar ==================== */
+
+.loading-bar {
+  height: 4px;
+  background: rgba(96, 165, 250, 0.2);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.loading-bar::after {
+  content: '';
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, #60a5fa, transparent);
+  animation: slideIn 1.5s infinite;
+}
+
+@keyframes slideIn {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+/* ==================== Error Box ==================== */
+
+.error-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 6px;
+  color: #fca5a5;
+  font-size: 13px;
+}
+
+.error-box svg {
+  flex-shrink: 0;
+  color: #ef4444;
+}
+
+/* ==================== Confidence Badge ==================== */
+
+.confidence-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  background: rgba(96, 165, 250, 0.15);
+  color: #93c5fd;
+}
+
+.confidence-badge.high {
+  background: rgba(16, 185, 129, 0.15);
+  color: #86efac;
+}
+
+.confidence-badge.medium {
+  background: rgba(59, 130, 246, 0.15);
+  color: #93c5fd;
+}
+
+.confidence-badge.low {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fcd34d;
+}
+
+.confidence-badge.very-low {
+  background: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+}
+
+/* ==================== Connectors List ==================== */
+
+.connectors-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.connector-card {
+  padding: 12px;
+  background: rgba(30, 41, 59, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.connector-card:hover {
+  background: rgba(30, 41, 59, 1);
+  border-color: rgba(96, 165, 250, 0.4);
+}
+
+.connector-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.connector-icon {
+  width: 20px;
+  height: 20px;
+  color: #60a5fa;
+  flex-shrink: 0;
+}
+
+.connector-info h4 {
+  margin: 0 0 2px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.type-badge {
+  margin: 0;
+  font-size: 11px;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.connector-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.detail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.detail-section label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #cbd5e1;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tag {
+  padding: 3px 8px;
+  background: rgba(96, 165, 250, 0.15);
+  border-radius: 4px;
+  font-size: 11px;
+  color: #93c5fd;
+  white-space: nowrap;
+}
+
+.tag.more {
+  background: rgba(100, 116, 139, 0.2);
+  color: #cbd5e1;
+}
+
+.auth-required {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: rgba(245, 158, 11, 0.1);
+  border-radius: 4px;
+  font-size: 12px;
+  color: #fcd34d;
+}
+
+.auth-required svg {
+  flex-shrink: 0;
+}
+
+/* ==================== Action Buttons ==================== */
+
+.action-buttons {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.btn {
+  flex: 1;
+  padding: 12px 16px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all 0.2s ease;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #60a5fa 0%, #a78bfa 100%);
+  color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(96, 165, 250, 0.3);
+}
+
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  background: rgba(100, 116, 139, 0.2);
+  color: #cbd5e1;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: rgba(100, 116, 139, 0.3);
+  border-color: rgba(148, 163, 184, 0.3);
+}
+
+.btn-secondary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.spinner {
+  animation: spin 1s linear infinite;
+}
+
+/* ==================== Tasks List ==================== */
+
+.tasks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.task-item {
+  padding: 12px;
+  background: rgba(30, 41, 59, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.task-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.status-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.status-icon.success {
+  color: #10b981;
+}
+
+.status-icon.error {
+  color: #ef4444;
+}
+
+.status-icon.loading {
+  color: #60a5fa;
+  animation: spin 1s linear infinite;
+}
+
+.status-icon.pending {
+  color: #f59e0b;
+}
+
+.task-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.task-info h4 {
+  margin: 0 0 2px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.message {
+  margin: 0;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.task-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.progress-bar {
+  flex: 1;
+  height: 6px;
+  background: rgba(100, 116, 139, 0.2);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #60a5fa, #a78bfa);
+  transition: width 0.3s ease;
+}
+
+.progress-text {
+  font-size: 11px;
+  color: #94a3b8;
+  min-width: 35px;
+  text-align: right;
+  font-weight: 600;
+}
+
+.task-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  background: rgba(239, 68, 68, 0.1);
+  border-radius: 4px;
+  color: #fca5a5;
+  font-size: 12px;
+}
+
+.task-error svg {
+  flex-shrink: 0;
+  color: #ef4444;
+}
+
+/* ==================== Completion ==================== */
+
+.completion-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: 8px;
+}
+
+.completion-header.success {
+  background: rgba(16, 185, 129, 0.1);
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+.completion-header.partial {
+  background: rgba(245, 158, 11, 0.1);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.completion-header h3 {
+  margin: 0 0 4px 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #86efac;
+}
+
+.completion-header.partial h3 {
+  color: #fcd34d;
+}
+
+.completion-header .subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: #6ee7b7;
+}
+
+.completion-header.partial .subtitle {
+  color: #fed7aa;
+}
+
+.completion-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: rgba(30, 41, 59, 0.8);
+  border-radius: 8px;
+}
+
+.summary-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.summary-item svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.summary-item.success svg {
+  color: #10b981;
+}
+
+.summary-item.error svg {
+  color: #ef4444;
+}
+
+.summary-item strong {
+  color: #e2e8f0;
+}
+
+/* ==================== Next Steps ==================== */
+
+.next-steps {
+  padding: 12px;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  border-radius: 8px;
+}
+
+.next-steps h4 {
+  margin: 0 0 10px 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #93c5fd;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.next-steps ul {
+  margin: 0;
+  padding-left: 20px;
+  list-style: none;
+}
+
+.next-steps li {
+  margin: 6px 0;
+  font-size: 12px;
+  color: #cbd5e1;
+  position: relative;
+  padding-left: 12px;
+}
+
+.next-steps li::before {
+  content: '→';
+  position: absolute;
+  left: 0;
+  color: #60a5fa;
+  font-weight: bold;
+}
+
+/* ==================== Responsive ==================== */
+
+@media (max-width: 768px) {
+  .auto-installer-panel {
+    padding: 16px;
+  }
+
+  .action-buttons {
+    flex-direction: column;
+  }
+
+  .connector-card {
+    padding: 10px;
+  }
+
+  .completion-header {
+    gap: 10px;
+  }
+
+  .completion-header h3 {
+    font-size: 14px;
+  }
+
+  .completion-header .subtitle {
+    font-size: 12px;
+  }
+}
+
+/* ==================== Scrollbar ==================== */
+
+.connectors-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.connectors-list::-webkit-scrollbar-track {
+  background: rgba(100, 116, 139, 0.1);
+  border-radius: 3px;
+}
+
+.connectors-list::-webkit-scrollbar-thumb {
+  background: rgba(96, 165, 250, 0.3);
+  border-radius: 3px;
+}
+
+.connectors-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(96, 165, 250, 0.5);
+}

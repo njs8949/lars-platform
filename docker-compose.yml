@@ -1,0 +1,73 @@
+version: '3.8'
+
+services:
+  lars-prism-auto:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    container_name: lars-prism-auto-prod
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env.production
+    environment:
+      PYTHONUNBUFFERED: 1
+      PYTHONDONTWRITEBYTECODE: 1
+      # Datadog APM Configuration
+      DD_TRACE_ENABLED: "true"
+      DD_TRACE_SAMPLE_RATE: "1"
+      DD_RUNTIME_METRICS_ENABLED: "true"
+      DD_PROFILING_ENABLED: "true"
+      DD_PROFILING_INCLUDE_GC: "true"
+      DD_APPSEC_ENABLED: "true"
+      DD_APPSEC_SCA_ENABLED: "true"
+      DD_APPSEC_STACK_TRACE_ENABLED: "true"
+      DD_IAST_ENABLED: "true"
+      DD_INSTRUMENTATION_ENABLED: "true"
+      DD_DBM_PROPAGATION_ENABLED: "true"
+      DD_DATA_SECURITY_ENABLED: "true"
+      DD_REMOTE_CONFIGURATION_ENABLED: "true"
+      # ✅ Link Source Code - GitHub 연동
+      DD_GIT_COMMIT_SHA: ${GIT_COMMIT_SHA:-main}
+      DD_GIT_BRANCH: ${GIT_BRANCH:-main}
+      DD_GIT_REPOSITORY_URL: "https://github.com/larsinc/LARS"
+      # ✅ Live Debugger - 프로덕션 디버깅
+      DD_DEBUGGER_ENABLED: "true"
+      # ✅ Dynamic Instrumentation - 커스텀 메트릭
+      DD_DYNAMIC_INSTRUMENTATION_ENABLED: "true"
+      # ✅ Universal Service Monitoring (USM) - 네트워크 모니터링
+      DD_SERVICE_MONITORING_ENABLED: "true"
+      # ✅ Log Management - 로그 수집
+      DD_LOGGING_ENABLED: "true"
+      # ✅ Synthetics Tests - API 테스트 준비
+      DD_SYNTHETICS_ENABLED: "true"
+      # ✅ Cloud Network Monitoring
+      DD_NETWORK_MONITORING_ENABLED: "true"
+      DD_USM_ENABLED: "true"
+      # AWS Glue Configuration
+      GLUE_BUCKET: "lars-glue-data-1791451635"
+      AWS_REGION: "ap-northeast-2"
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      # Service identification
+      DD_SERVICE: "lars-prism-auto"
+      # Tags for log aggregation
+      DD_TAGS: "env:production,service:lars-prism-auto,stream:multi,host:local"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    stdin_open: true
+    tty: true
+    networks:
+      - lars-network
+
+networks:
+  lars-network:
+    driver: bridge
