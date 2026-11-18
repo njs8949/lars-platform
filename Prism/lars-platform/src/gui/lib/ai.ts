@@ -5,7 +5,7 @@
 
 import { getToken } from './auth';
 
-const API_BASE = 'http://localhost:8000/api/ai';
+const API_BASE = 'http://localhost:8001/api/ai';
 
 export interface DocumentResponse {
   title: string;

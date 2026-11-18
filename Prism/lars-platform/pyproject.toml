@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "forge-cli"
+version = "1.4.0"
+description = "LARS Prism CLI - AI-Powered Development Platform Command Line Interface"
+readme = "CLI_GUIDE.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+    {name = "LARS Inc.", email = "support@lars-technologies.com"}
+]
+keywords = [
+    "cli",
+    "ai",
+    "development",
+    "lars",
+    "prism",
+    "automation"
+]
+
+dependencies = [
+    "typer>=0.9.0",
+    "rich>=13.0.0",
+    "requests>=2.28.0",
+    "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "black>=22.0",
+    "flake8>=4.0",
+    "mypy>=0.950",
+]
+
+[project.urls]
+Homepage = "https://lars-technologies.com"
+Documentation = "https://docs.lars-technologies.com"
+Repository = "https://github.com/lars-inc/prism"
+Issues = "https://github.com/lars-inc/prism/issues"
+
+[project.scripts]
+forge = "src.cli.main:main"
+
+[tool.setuptools]
+packages = ["src", "src.cli", "src.api", "src.core", "src.gui"]
+
+[tool.black]
+line-length = 100
+target-version = ["py39", "py310", "py311"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false

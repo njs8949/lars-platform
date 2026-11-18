@@ -1,0 +1,66 @@
+{
+  "test_name": "LARS Prism 웹사이트 템플릿 생성 테스트",
+  "timestamp": "2026-09-04T20:01:41.886015",
+  "categories": {
+    "Marketing Sites": 3,
+    "E-Commerce": 2,
+    "Blog & CMS": 3,
+    "Enterprise Apps": 3,
+    "Fullstack Applications": 3,
+    "Component Libraries": 3
+  },
+  "total_websites": 11,
+  "total_apps": 3,
+  "total_component_libraries": 3,
+  "supported_frameworks": [
+    "React",
+    "Vue.js",
+    "Angular",
+    "Svelte",
+    "Next.js",
+    "Gatsby",
+    "Nuxt",
+    "Node.js",
+    "FastAPI",
+    "Go",
+    "Java",
+    "Django"
+  ],
+  "supported_features": [
+    "Responsive Design",
+    "Authentication & Authorization",
+    "Database Integration",
+    "Payment Processing",
+    "Real-time Updates",
+    "File Upload & CDN",
+    "Search & Filtering",
+    "Analytics Integration",
+    "SEO Optimization",
+    "PWA Support",
+    "Mobile Responsive",
+    "Dark Mode Support"
+  ],
+  "deployment_options": [
+    "Docker & Kubernetes",
+    "Vercel & Netlify",
+    "AWS (EC2, Lambda, RDS)",
+    "Google Cloud",
+    "Azure",
+    "DigitalOcean",
+    "Heroku"
+  ],
+  "code_generation": {
+    "html_css_javascript": true,
+    "react_components": true,
+    "vue_components": true,
+    "rest_api": true,
+    "graphql_api": true,
+    "database_schema": true,
+    "docker_config": true,
+    "kubernetes_manifest": true,
+    "test_code": true,
+    "api_documentation": true
+  },
+  "status": "✅ All tests passed",
+  "success_rate": "100%"
+}

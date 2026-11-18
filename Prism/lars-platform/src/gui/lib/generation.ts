@@ -1,3 +1,5 @@
+const GENERATION_API = (typeof window !== 'undefined' && window.location.hostname === 'localhost' ? 'http://localhost:8001' : '') + '/api/generation';
+
 /**
  * Intelligent Generation Client Library
  * 프론티어 AI 방식 자동 생성 API 클라이언트
@@ -37,7 +39,7 @@ export async function autoDetectGenerationType(
   context?: Record<string, any>[],
   language: string = 'ko'
 ): Promise<ClassificationResult> {
-  const response = await fetch('/api/generation/auto-detect', {
+  const response = await fetch(`${GENERATION_API}/auto-detect`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -62,7 +64,7 @@ export async function* generateContentStream(
   context?: Record<string, any>[],
   language: string = 'ko'
 ): AsyncGenerator<string> {
-  const response = await fetch('/api/generation/generate', {
+  const response = await fetch(`${GENERATION_API}/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -97,14 +99,14 @@ export async function* generateContentStream(
 
       for (const line of lines) {
         if (line.trim()) {
-          yield line;
+          yield decodeStreamLine(line);
         }
       }
     }
 
     // 남은 버퍼 처리
     if (buffer.trim()) {
-      yield buffer;
+      yield decodeStreamLine(buffer);
     }
   } finally {
     reader.releaseLock();
@@ -119,7 +121,7 @@ export async function generateContent(
   context?: Record<string, any>[],
   language: string = 'ko'
 ): Promise<{ content: string; metadata: GenerationMetadata }> {
-  const response = await fetch('/api/generation/generate', {
+  const response = await fetch(`${GENERATION_API}/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -145,7 +147,7 @@ export async function getPreview(
   generationType: string,
   outputFormat: string
 ): Promise<Record<string, any>> {
-  const response = await fetch('/api/generation/preview', {
+  const response = await fetch(`${GENERATION_API}/preview`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -171,7 +173,7 @@ export async function convertFormat(
   fromFormat: string,
   toFormat: string
 ): Promise<string> {
-  const response = await fetch('/api/generation/convert', {
+  const response = await fetch(`${GENERATION_API}/convert`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -193,7 +195,7 @@ export async function convertFormat(
  * 지원 포맷 조회
  */
 export async function getSupportedFormats(): Promise<Record<string, any>> {
-  const response = await fetch('/api/generation/formats');
+  const response = await fetch(`${GENERATION_API}/formats`);
 
   if (!response.ok) {
     throw new Error('Failed to get supported formats');
@@ -209,7 +211,7 @@ export async function batchGenerate(
   messages: string[],
   language: string = 'ko'
 ): Promise<Array<{ message: string; content: string; metadata: GenerationMetadata }>> {
-  const response = await fetch('/api/generation/batch-generate', {
+  const response = await fetch(`${GENERATION_API}/batch-generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -233,7 +235,7 @@ export class GenerationWebSocket {
   private ws: WebSocket | null = null;
   private url: string;
 
-  constructor(url: string = 'ws://localhost:8000/api/generation/ws/generate') {
+  constructor(url: string = 'ws://localhost:8001/api/generation/ws/generate') {
     this.url = url;
   }
 
@@ -294,6 +296,18 @@ export class GenerationWebSocket {
       this.ws = null;
     }
   }
+}
+
+/** 서버는 내용 조각을 [C]<JSON 문자열> 로 보낸다. 줄바꿈을 살리려고 JSON으로 감싼 것을 풀어서 돌려준다. */
+function decodeStreamLine(line: string): string {
+  if (line.startsWith('[C]')) {
+    try {
+      return JSON.parse(line.slice(3));
+    } catch {
+      return line.slice(3);
+    }
+  }
+  return line;
 }
 
 /**

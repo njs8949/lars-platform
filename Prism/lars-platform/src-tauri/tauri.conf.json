@@ -1,8 +1,8 @@
 {
   "build": {
     "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build",
-    "devPath": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build:desktop",
+    "devPath": "http://localhost:5173",
     "distDir": "../dist"
   },
   "package": {
@@ -14,7 +14,8 @@
       "all": false,
       "shell": { "all": false, "open": true },
       "dialog": { "all": true },
-      "fs": { "all": true, "scope": ["$HOME/.lars/**"] }
+      "fs": { "all": true, "scope": ["$HOME/.lars/**"] },
+      "http": { "all": true, "scope": ["http://localhost:8001/*"] }
     },
     "bundle": {
       "active": true,

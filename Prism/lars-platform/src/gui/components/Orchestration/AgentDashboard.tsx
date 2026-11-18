@@ -50,7 +50,7 @@ const AgentDashboard: React.FC<{ language?: 'ko' | 'en' }> = ({ language = 'en' 
 
   const fetchStatus = async () => {
     try {
-      const response = await fetch('/api/orchestration/status');
+      const response = await fetch('http://localhost:8001/api/orchestration/status');
       const data = await response.json();
       setStatus(data);
       setLoading(false);

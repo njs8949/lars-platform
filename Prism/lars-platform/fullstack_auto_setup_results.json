@@ -1,0 +1,53 @@
+{
+  "test_name": "LARS Prism 풀스택 자동 설정 및 클라우드 배포 자동화 테스트",
+  "timestamp": "2026-09-04T20:10:27.532805",
+  "frontend_frameworks": 4,
+  "backend_frameworks": 4,
+  "cloud_deployment_types": 5,
+  "infrastructure_templates": 4,
+  "supported_frontend": [
+    "react",
+    "next",
+    "vue",
+    "angular"
+  ],
+  "supported_backend": [
+    "node",
+    "fastapi",
+    "python",
+    "go"
+  ],
+  "deployment_types": [
+    "Frontend Only",
+    "Fullstack (Node.js)",
+    "Fullstack (Python)",
+    "Microservices",
+    "ML/Data Intensive"
+  ],
+  "cloud_services": [
+    "Vercel",
+    "Netlify",
+    "Railway",
+    "Render",
+    "Heroku",
+    "AWS",
+    "Google Cloud",
+    "Azure",
+    "DigitalOcean",
+    "Hugging Face"
+  ],
+  "automation_features": [
+    "Auto Frontend Setup",
+    "Auto Backend Setup",
+    "Auto Cloud Recommendation",
+    "Auto Deployment Pipeline",
+    "Infrastructure as Code Generation",
+    "Monitoring & Logging Setup",
+    "Cost Estimation & Optimization",
+    "Auto HTTPS & Domain Setup",
+    "CI/CD Pipeline Generation",
+    "Health Check & Auto Rollback"
+  ],
+  "status": "✅ All tests passed",
+  "success_rate": "100%"
+}
