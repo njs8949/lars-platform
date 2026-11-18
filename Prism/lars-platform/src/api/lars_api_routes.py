@@ -26,7 +26,7 @@ import requests
 from pydantic import BaseModel, Field
 
 from src.api.feature_routes import _signed_in_email
-from src.core import agent_vault, api_keys, console_store, usage_ledger
+from src.core import agent_vault, api_keys, console_store, prism_features, usage_ledger
 from src.core.llm_provider import bedrock_stream, is_production
 from src.core.model_router import (
     ENGINES,
@@ -710,3 +710,68 @@ async def agent_chat_stream(body: AgentChatRequest, request: Request):
 
     return StreamingResponse(events(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+# ---------- Prism 기능 호출 (API 키: /v1/prism, 콘솔 로그인: /api/console/prism) ----------
+
+prism_router = APIRouter(prefix="/v1/prism", tags=["prism"])
+_console_prism = APIRouter(prefix="/api/console/prism", tags=["console"])
+
+
+def _run_prism(feature: str, params: dict) -> JSONResponse:
+    """기능을 실행하고 응답 모양을 맞춘다. 키·외부 응답 본문은 오류 메시지에 넣지 않는다."""
+    from fastapi import HTTPException as _HTTPException
+    try:
+        result = prism_features.run(feature, params)
+        return JSONResponse(content={"object": "prism.result", "feature": feature, "result": result})
+    except ValueError as e:
+        return _error(400, str(e))
+    except RuntimeError as e:
+        return _error(503, str(e), "upstream_error")
+    except _HTTPException as e:
+        return _error(e.status_code, str(e.detail), "upstream_error" if e.status_code >= 500 else "invalid_request_error")
+
+
+@prism_router.get("/features")
+async def prism_features_list(request: Request):
+    key = api_keys.verify(_bearer(request))
+    if key is None:
+        return _error(401, "API 키가 없거나 올바르지 않습니다.", "authentication_error")
+    return {"object": "list", "data": prism_features.FEATURES}
+
+
+@prism_router.post("/{feature}")
+async def prism_call(feature: str, request: Request):
+    key = api_keys.verify(_bearer(request))
+    if key is None:
+        return _error(401, "API 키가 없거나 올바르지 않습니다.", "authentication_error")
+    if not api_keys.allow_request(key["id"]):
+        return _error(429, f"요청이 너무 많습니다. 분당 {api_keys.RATE_LIMIT_PER_MIN}회까지 보낼 수 있습니다.", "rate_limit_error")
+    if feature not in prism_features.RUNNERS:
+        return _error(404, f"기능 '{feature}'을(를) 찾을 수 없습니다. GET /v1/prism/features 로 목록을 확인하세요.")
+    try:
+        params = await request.json()
+    except ValueError:
+        return _error(400, "요청 본문은 JSON 객체여야 합니다.")
+    api_keys.touch(key["id"])
+    return await asyncio.to_thread(_run_prism, feature, params)
+
+
+@_console_prism.get("/features")
+async def console_prism_features(request: Request):
+    _signed_in_email(request)
+    return {"object": "list", "data": prism_features.FEATURES}
+
+
+@_console_prism.post("/{feature}")
+async def console_prism_call(feature: str, request: Request):
+    owner = _signed_in_email(request)
+    if not api_keys.allow_request("prism-console:" + owner):
+        return _error(429, "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.", "rate_limit_error")
+    if feature not in prism_features.RUNNERS:
+        return _error(404, f"기능 '{feature}'을(를) 찾을 수 없습니다.")
+    try:
+        params = await request.json()
+    except ValueError:
+        return _error(400, "요청 본문은 JSON 객체여야 합니다.")
+    return await asyncio.to_thread(_run_prism, feature, params)

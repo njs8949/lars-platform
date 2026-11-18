@@ -2869,11 +2869,13 @@ async def console_updates(http_request: Request):
     return {"entries": entries[:6]}
 
 
-from src.api.lars_api_routes import v1 as _lars_v1, keys_router as _lars_keys_router, console_router as _lars_console_router, agents_router as _lars_agents_router
+from src.api.lars_api_routes import v1 as _lars_v1, keys_router as _lars_keys_router, console_router as _lars_console_router, agents_router as _lars_agents_router, prism_router as _lars_prism_router, _console_prism as _lars_console_prism
 app.include_router(_lars_v1)
 app.include_router(_lars_keys_router)
 app.include_router(_lars_console_router)
 app.include_router(_lars_agents_router)
+app.include_router(_lars_prism_router)
+app.include_router(_lars_console_prism)
 
 
 @app.post("/api/feedback")

@@ -166,7 +166,7 @@ function Sidebar({ route }: { route: string }) {
       {link('#/batches', '배치', 'batches')}
       {link('#/keys', 'API 키', 'keys')}
       {link('#/logs', '로그', 'logs')}
-      {link('#/resources', '리소스', 'resources')}
+      {link('#/resources', 'Prism 기능', 'resources')}
       {link('#/files', '파일', 'files')}
       {link('#/skills', '스킬', 'skills')}
       {link('#/webhooks', '웹훅', 'webhooks')}
@@ -409,21 +409,154 @@ function Logs({ rows }: { rows: LogRow[] }) {
 
 // ---------- 페이지: 리소스 ----------
 
-function Resources() {
-  const items = [
-    { t: '채팅', d: '대화, 도구 호출, 웹 검색을 사용합니다.' },
-    { t: '앱 및 확장', d: 'Google, GitHub, Notion, Slack, Outlook 같은 서비스를 연결합니다.' },
-    { t: '데이터 웨어하우스', d: '데이터를 저장하고 SQL로 조회합니다.' },
-    { t: '통계 분석', d: '기술통계, 상관, 회귀, 시계열 분석을 실행합니다.' },
-    { t: '자율 에이전트', d: '목표를 주면 단계별로 작업을 수행합니다.' },
-    { t: '프로젝트·덱 편집기', d: '프로젝트 단위로 자료를 모으고 슬라이드를 만듭니다.' },
-  ];
+// ---------- 페이지: Prism 기능 (실제 호출) ----------
+
+const PRISM_FEATURES: { id: string; title: string; desc: string }[] = [
+  { id: 'documents', title: '문서 작성', desc: '보고서, 메모, 제안서, 요약문, 이메일을 마크다운으로 씁니다.' },
+  { id: 'presentations', title: '발표 자료 구성', desc: '주제로 슬라이드 제목, 내용, 발표자 메모를 만듭니다.' },
+  { id: 'images', title: '이미지 생성', desc: '텍스트 설명으로 이미지를 만듭니다.' },
+  { id: 'descriptive', title: '기술통계', desc: '숫자 목록의 평균, 중앙값, 분산 등을 계산합니다.' },
+  { id: 'correlation', title: '상관 분석', desc: '여러 변수 사이의 상관계수를 계산합니다.' },
+];
+
+async function apiPost<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${API}${path}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token() ?? ''}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401) throw new Error('로그인이 만료되었습니다. Prism 앱에서 다시 로그인해 주세요.');
+  if (!res.ok) throw new Error(data?.error?.message || `HTTP ${res.status}`);
+  return data as T;
+}
+
+const parseNumbers = (text: string): number[] => {
+  const parts = text.split(/[\s,]+/).filter(Boolean);
+  const nums = parts.map(Number);
+  if (nums.some((n) => Number.isNaN(n))) throw new Error('숫자가 아닌 값이 있습니다. 쉼표나 줄바꿈으로 숫자만 적어 주세요.');
+  if (nums.length === 0) throw new Error('데이터를 입력해 주세요.');
+  return nums;
+};
+
+function PrismFeatures() {
+  const [feature, setFeature] = useState('documents');
+  const [title, setTitle] = useState('');
+  const [text, setText] = useState('');
+  const [contentType, setContentType] = useState('report');
+  const [language, setLanguage] = useState('ko');
+  const [slides, setSlides] = useState('6');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<any>(null);
+
+  const buildParams = (): Record<string, unknown> => {
+    switch (feature) {
+      case 'documents': return { title, prompt: text, content_type: contentType, language };
+      case 'presentations': return { title, topic: text, num_slides: Number(slides) || 6, language };
+      case 'images': return { prompt: text };
+      case 'descriptive': return { data: parseNumbers(text) };
+      case 'correlation': {
+        let variables: unknown;
+        try { variables = JSON.parse(text); } catch { throw new Error('변수는 {"이름": [숫자, ...]} 형식의 JSON으로 적어 주세요.'); }
+        return { variables };
+      }
+      default: return {};
+    }
+  };
+
+  const run = async () => {
+    setBusy(true); setError(null); setResult(null);
+    try {
+      const params = buildParams();
+      const res = await apiPost<{ result: any }>(`/console/prism/${feature}`, params);
+      setResult(res.result);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const meta = PRISM_FEATURES.find((f) => f.id === feature)!;
+  const hint: Record<string, string> = {
+    documents: '무엇을 써야 하는지 자세히 적을수록 결과가 좋아집니다.',
+    presentations: '주제와 청중을 함께 적으면 슬라이드가 더 구체적으로 나옵니다.',
+    images: '장면, 색감, 분위기를 적어 주세요.',
+    descriptive: '숫자를 쉼표나 줄바꿈으로 구분해 적어 주세요. 예: 12, 15, 9, 20',
+    correlation: '예: {"광고비": [1, 2, 3, 4], "매출": [2, 4, 5, 9]} (모든 변수의 개수가 같아야 합니다)',
+  };
+
   return (
     <>
-      <div className="page-head"><h1>리소스</h1></div>
+      <div className="page-head"><h1>Prism 기능</h1></div>
+      <p className="sub" style={{ marginBottom: 16 }}>Prism의 기능을 여기서 바로 실행할 수 있습니다. 같은 기능을 API 키로 호출하려면 <code>/v1/prism/&lt;기능&gt;</code>을 사용하세요.</p>
       <div className="grid3">
-        {items.map((i) => <Resource key={i.t} title={i.t} text={i.d} href={MAIN_APP} />)}
+        {PRISM_FEATURES.map((f) => (
+          <button key={f.id} className={`card ${feature === f.id ? 'active' : ''}`} onClick={() => { setFeature(f.id); setResult(null); setError(null); }}
+            style={{ textAlign: 'left', cursor: 'pointer', border: feature === f.id ? '1px solid var(--accent)' : undefined }}>
+            <div className="big" style={{ fontSize: 18 }}>{f.title}</div>
+            <div className="sub">{f.desc}</div>
+          </button>
+        ))}
       </div>
+
+      <section className="card wide" style={{ marginTop: 16 }}>
+        <div className="card-label">{meta.title}</div>
+        <div className="sub" style={{ marginBottom: 12 }}>{hint[feature]}</div>
+
+        {feature === 'documents' && (
+          <>
+            <input className="text-input" placeholder="제목 (선택)" aria-label="제목" value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} />
+            <select className="text-input" aria-label="문서 종류" value={contentType} onChange={(e) => setContentType(e.target.value)} style={{ marginTop: 8 }}>
+              <option value="report">보고서</option><option value="memo">메모</option><option value="proposal">제안서</option><option value="summary">요약문</option><option value="email">이메일</option>
+            </select>
+            <select className="text-input" aria-label="언어" value={language} onChange={(e) => setLanguage(e.target.value)} style={{ marginTop: 8 }}>
+              <option value="ko">한국어</option><option value="en">English</option>
+            </select>
+          </>
+        )}
+        {feature === 'presentations' && (
+          <>
+            <input className="text-input" placeholder="발표 제목 (선택)" aria-label="발표 제목" value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} />
+            <input className="text-input" type="number" min={3} max={15} aria-label="슬라이드 수" value={slides} onChange={(e) => setSlides(e.target.value)} style={{ marginTop: 8 }} />
+            <select className="text-input" aria-label="언어" value={language} onChange={(e) => setLanguage(e.target.value)} style={{ marginTop: 8 }}>
+              <option value="ko">한국어</option><option value="en">English</option>
+            </select>
+          </>
+        )}
+
+        <textarea className="textarea" rows={6} aria-label={meta.title + ' 입력'} style={{ marginTop: 8 }} value={text}
+          placeholder={feature === 'documents' ? '요청 내용' : feature === 'presentations' ? '발표 주제' : feature === 'images' ? '이미지 설명' : feature === 'descriptive' ? '12, 15, 9, 20' : '{"변수": [1, 2, 3]}'}
+          onChange={(e) => setText(e.target.value)} />
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+          <button className="btn" onClick={run} disabled={busy || !text.trim()}>{busy ? '실행 중…' : '실행'}</button>
+        </div>
+        {error && <div className="error-text" style={{ marginTop: 12 }}>{error}</div>}
+      </section>
+
+      {result && (
+        <section className="card wide" style={{ marginTop: 16 }}>
+          <div className="card-label">결과</div>
+          {feature === 'documents' && <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.7 }}>{result.content}</div>}
+          {feature === 'presentations' && (
+            <ol style={{ paddingLeft: 20, lineHeight: 1.7 }}>
+              {result.slides.map((s: any) => (
+                <li key={s.slide_num} style={{ marginBottom: 12 }}>
+                  <strong>{s.title}</strong>
+                  <div>{s.content}</div>
+                  {s.speaker_notes && <div className="sub">발표자 메모: {s.speaker_notes}</div>}
+                </li>
+              ))}
+            </ol>
+          )}
+          {feature === 'images' && (
+            result.url ? <img src={result.url} alt="생성된 이미지" style={{ maxWidth: '100%', borderRadius: 12 }} /> : <pre className="sub">{JSON.stringify(result, null, 2)}</pre>
+          )}
+          {(feature === 'descriptive' || feature === 'correlation') && <pre style={{ whiteSpace: 'pre-wrap', fontSize: 13 }}>{JSON.stringify(result, null, 2)}</pre>}
+        </section>
+      )}
     </>
   );
 }
@@ -728,7 +861,7 @@ export default function App() {
     if (route === 'keys') return <ApiKeys />;
     if (route === 'models') return <Models data={data} />;
     if (route === 'logs') return <Logs rows={logs} />;
-    if (route === 'resources') return <Resources />;
+    if (route === 'resources') return <PrismFeatures />;
     if (route === 'usage') return <Usage data={data} range={range} setRange={setRange} />;
     if (route === 'settings') return <Settings data={data} />;
     return <Home data={data} range={range} setRange={setRange} updates={updates} />;
